@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>立式气液分离器选型计算器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>立式气液分离器选型计算器</h1>
+            <p class="subtitle">Vertical Suction Accumulator Sizing Calculator</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 左侧：参数输入区 -->
+            <section class="input-section">
+                <h2>输入参数</h2>
+                <div class="form-group">
+                    <label for="refrigerant">制冷剂类型</label>
+                    <select id="refrigerant" class="input-field">
+                        <option value="R134a">R134a</option>
+                        <option value="R245fa">R245fa</option>
+                        <option value="R1234ze(E)">R1234ze(E)</option>
+                        <option value="R410A">R410A</option>
+                        <option value="Ammonia">Ammonia</option>
+                        <option value="R290">R290</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="coolingCapacity">制冷量 Q (kW)</label>
+                    <input type="number" id="coolingCapacity" class="input-field" value="100" step="0.1" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="evapTemp">蒸发温度 Te (°C)</label>
+                    <input type="number" id="evapTemp" class="input-field" value="5" step="0.1">
+                </div>
+
+                <div class="form-group">
+                    <label for="superheat">吸气过热度 ΔT_sh (K)</label>
+                    <input type="number" id="superheat" class="input-field" value="5" step="0.1" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="calcMode">计算模式</label>
+                    <select id="calcMode" class="input-field">
+                        <option value="auto">自动计算（基于终端速度）</option>
+                        <option value="manual">手动输入设计气速</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="dropletSizeGroup">
+                    <label for="dropletSize">液滴直径 Dp (µm)</label>
+                    <input type="number" id="dropletSize" class="input-field" value="152" step="1" min="100" max="200">
+                    <small class="hint">推荐范围: 100 - 200 µm (默认 152 µm)</small>
+                </div>
+
+                <div class="form-group" id="gasVelocityGroup" style="display: none;">
+                    <label for="gasVelocity">设计气速 u (m/s)</label>
+                    <input type="number" id="gasVelocity" class="input-field" value="0.6" step="0.1" min="0.1" max="2.0">
+                    <small class="hint">推荐范围: 0.5 - 1.0 m/s</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="velocityRatio">设计气速系数</label>
+                    <input type="number" id="velocityRatio" class="input-field" value="0.75" step="0.05" min="0.5" max="0.9">
+                    <small class="hint">设计气速 = 系数 × 终端速度 (推荐: 0.75 - 0.9)</small>
+                </div>
+
+                <button id="calculateBtn" class="calculate-btn">计算</button>
+            </section>
+
+            <!-- 右侧：计算结果区 -->
+            <section class="result-section">
+                <h2>计算结果</h2>
+                <div id="status" class="status-message"></div>
+                <div class="results-grid" id="resultsContainer">
+                    <div class="result-item">
+                        <span class="result-label">质量流量</span>
+                        <span class="result-value" id="massFlow">-</span>
+                        <span class="result-unit">kg/s</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">吸气气体密度</span>
+                        <span class="result-value" id="gasDensity">-</span>
+                        <span class="result-unit">kg/m³</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">筒身内径 D</span>
+                        <span class="result-value" id="diameter">-</span>
+                        <span class="result-unit">mm</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">筒身高度 H</span>
+                        <span class="result-value" id="height">-</span>
+                        <span class="result-unit">mm</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">筒内容积</span>
+                        <span class="result-value" id="volume">-</span>
+                        <span class="result-unit">L</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">终端速度 vt</span>
+                        <span class="result-value" id="terminalVelocity">-</span>
+                        <span class="result-unit">m/s</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">液体密度</span>
+                        <span class="result-value" id="liquidDensity">-</span>
+                        <span class="result-unit">kg/m³</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-label">气体动力粘度</span>
+                        <span class="result-value" id="gasViscosity">-</span>
+                        <span class="result-unit">Pa·s</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,33 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# CoolProp library files - 这些文件需要包含在仓库中，所以不忽略
+# src/js/coolprop.js
+# js/coolprop.js
+# coolprop.js
+# coolprop.wasm
+# public/coolprop.wasm
+# public/*.wasm
