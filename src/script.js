@@ -1161,26 +1161,346 @@ async function calculate() {
     }
 }
 
+// 获取K值对应的不锈钢丝网规格信息
+function getMeshSpecByK(K) {
+    const meshSpecs = {
+        '0.05-0.08': {
+            range: '0.05 - 0.08',
+            mesh: '100目/英寸',
+            wireDiameter: '0.10 mm',
+            thickness: '50-100 mm',
+            material: '304/316不锈钢',
+            application: '低负荷，精细分离',
+            porosity: '约85%'
+        },
+        '0.08-0.12': {
+            range: '0.08 - 0.12',
+            mesh: '80目/英寸',
+            wireDiameter: '0.12 mm',
+            thickness: '100-150 mm',
+            material: '304/316不锈钢',
+            application: '中等负荷，标准分离',
+            porosity: '约88%'
+        },
+        '0.12-0.15': {
+            range: '0.12 - 0.15',
+            mesh: '60目/英寸',
+            wireDiameter: '0.15 mm',
+            thickness: '100-150 mm',
+            material: '304/316不锈钢',
+            application: '标准应用，推荐值',
+            porosity: '约90%'
+        },
+        '0.15-0.18': {
+            range: '0.15 - 0.18',
+            mesh: '50目/英寸',
+            wireDiameter: '0.18 mm',
+            thickness: '100-200 mm',
+            material: '304/316不锈钢',
+            application: '高负荷，粗分离',
+            porosity: '约92%'
+        },
+        '0.18-0.25': {
+            range: '0.18 - 0.25',
+            mesh: '40目/英寸',
+            wireDiameter: '0.20 mm',
+            thickness: '150-200 mm',
+            material: '304/316不锈钢',
+            application: '极高负荷，粗分离',
+            porosity: '约94%'
+        }
+    };
+    
+    if (K <= 0.08) {
+        return meshSpecs['0.05-0.08'];
+    } else if (K <= 0.12) {
+        return meshSpecs['0.08-0.12'];
+    } else if (K <= 0.15) {
+        return meshSpecs['0.12-0.15'];
+    } else if (K <= 0.18) {
+        return meshSpecs['0.15-0.18'];
+    } else {
+        return meshSpecs['0.18-0.25'];
+    }
+}
+
+// 更新K值对应的丝网规格提示
+function updateMeshSpecInfo(K) {
+    const specInfo = document.getElementById('meshSpecInfo');
+    const specDetails = document.getElementById('meshSpecDetails');
+    
+    if (!specInfo || !specDetails) return;
+    
+    if (K >= 0.05 && K <= 0.3) {
+        const spec = getMeshSpecByK(K);
+        specDetails.innerHTML = `
+            <div><strong>K值范围：</strong>${spec.range}</div>
+            <div><strong>丝网规格：</strong>${spec.mesh}</div>
+            <div><strong>丝径：</strong>${spec.wireDiameter}</div>
+            <div><strong>推荐厚度：</strong>${spec.thickness}</div>
+            <div><strong>材质：</strong>${spec.material}</div>
+            <div><strong>孔隙率：</strong>${spec.porosity}</div>
+            <div style="margin-top: 8px; color: #1976d2;"><strong>应用：</strong>${spec.application}</div>
+        `;
+        specInfo.style.display = 'block';
+    } else {
+        specInfo.style.display = 'none';
+    }
+}
+
+// 水蒸汽立式计算函数
+async function calculateSteam() {
+    try {
+        // 检查 CoolProp 是否已初始化
+        if (!CoolPropModule) {
+            showStatus('正在初始化 CoolProp...', 'info', 'statusSteam');
+            await initCoolProp();
+        }
+
+        // 获取输入参数
+        const P_in_MPa = parseFloat(document.getElementById('inletPressure').value);
+        const x_in = parseFloat(document.getElementById('inletDryness').value);
+        const m_total_kg_h = parseFloat(document.getElementById('massFlowRate').value);
+        const efficiency = parseFloat(document.getElementById('separationEfficiency').value);
+        const K = parseFloat(document.getElementById('kFactor').value);
+
+        // 验证输入
+        if (isNaN(P_in_MPa) || P_in_MPa <= 0 || P_in_MPa > 22.1) {
+            throw new Error('入口压力必须在 0.1 - 22.1 MPa 之间（水的临界压力为 22.1 MPa）');
+        }
+        if (isNaN(x_in) || x_in < 0 || x_in > 1) {
+            throw new Error('入口干度必须在 0.0 - 1.0 之间');
+        }
+        if (isNaN(m_total_kg_h) || m_total_kg_h <= 0) {
+            throw new Error('总质量流量必须大于 0');
+        }
+        if (isNaN(efficiency) || efficiency < 90 || efficiency > 99.99) {
+            throw new Error('分离效率必须在 90% - 99.99% 之间');
+        }
+        if (isNaN(K) || K <= 0 || K > 0.5) {
+            throw new Error('Souders-Brown 系数必须在 0.05 - 0.5 之间');
+        }
+
+        // 禁用计算按钮
+        const calcBtn = document.getElementById('calculateBtnSteam');
+        calcBtn.disabled = true;
+        calcBtn.textContent = '计算中...';
+
+        showStatus('正在计算...', 'info', 'statusSteam');
+
+        // 单位转换：MPa 转 Pa
+        const P_in_Pa = P_in_MPa * 1e6;
+
+        // 使用 CoolProp 计算水/蒸汽属性
+        // CoolProp 中水的名称是 "Water" 或 "H2O"
+        const fluid = 'Water';
+
+        // 1. 计算饱和温度（基于压力）
+        const T_sat_K = CoolPropModule.PropsSI('T', 'P', P_in_Pa, 'Q', 1, fluid);
+        if (T_sat_K <= 0 || !isFinite(T_sat_K)) {
+            throw new Error('无法计算饱和温度，请检查压力参数');
+        }
+        const T_sat_C = T_sat_K - 273.15;
+
+        // 2. 计算饱和液体密度
+        const rho_l = CoolPropModule.PropsSI('D', 'P', P_in_Pa, 'Q', 0, fluid);
+        if (rho_l <= 0 || !isFinite(rho_l)) {
+            throw new Error('无法计算液体密度');
+        }
+
+        // 3. 计算饱和蒸汽密度
+        const rho_v = CoolPropModule.PropsSI('D', 'P', P_in_Pa, 'Q', 1, fluid);
+        if (rho_v <= 0 || !isFinite(rho_v)) {
+            throw new Error('无法计算蒸汽密度');
+        }
+
+        // 4. 质量平衡计算
+        // m_vapor = m_total * x_in (入口蒸汽质量流量)
+        // m_liquid = m_total * (1 - x_in) (入口液体质量流量)
+        const m_vapor_in_kg_h = m_total_kg_h * x_in;
+        const m_liquid_in_kg_h = m_total_kg_h * (1 - x_in);
+
+        // 5. 分离效率计算
+        // 假设分离效率应用于液体分离（即有多少液体被分离出来）
+        // 分离后的液体流量 = 入口液体流量 + 部分蒸汽冷凝（根据效率）
+        // 简化模型：假设分离效率主要影响液体分离
+        const m_liquid_separated_kg_h = m_liquid_in_kg_h + m_vapor_in_kg_h * (1 - efficiency / 100);
+        const m_steam_out_kg_h = m_total_kg_h - m_liquid_separated_kg_h;
+
+        // 6. Souders-Brown 方程计算
+        // v_max = K * sqrt((rho_l - rho_v) / rho_v)
+        const v_max = K * Math.sqrt((rho_l - rho_v) / rho_v);
+        if (v_max <= 0 || !isFinite(v_max)) {
+            throw new Error('无法计算最大允许气速');
+        }
+
+        // 7. 计算最小流通面积
+        // 基于出口蒸汽流量计算
+        // A_min = (m_steam / 3600) / (v_max * rho_v)
+        // 注意：质量流量单位从 kg/h 转换为 kg/s
+        const m_steam_kg_s = m_steam_out_kg_h / 3600;
+        const A_min = m_steam_kg_s / (v_max * rho_v);
+        if (A_min <= 0 || !isFinite(A_min)) {
+            throw new Error('无法计算最小流通面积');
+        }
+
+        // 8. 计算推荐容器直径
+        // D = sqrt(4 * A_min / PI)
+        const D_m = Math.sqrt((4 * A_min) / Math.PI);
+        const D_mm = D_m * 1000;
+
+        // 8.1 计算推荐气分高度（通常为2.5-3倍直径）
+        const H_D_ratio = 2.75; // 推荐长径比
+        const H_mm = D_mm * H_D_ratio;
+
+        // 9. 更新结果显示
+        document.getElementById('saturationTemp').textContent = formatNumber(T_sat_C, 2);
+        document.getElementById('liquidDensitySteam').textContent = formatNumber(rho_l, 2);
+        document.getElementById('vaporDensitySteam').textContent = formatNumber(rho_v, 4);
+        document.getElementById('separatedLiquidFlow').textContent = formatNumber(m_liquid_separated_kg_h, 2);
+        document.getElementById('drySteamFlow').textContent = formatNumber(m_steam_out_kg_h, 2);
+        document.getElementById('maxVelocity').textContent = formatNumber(v_max, 3);
+        document.getElementById('vesselDiameter').textContent = formatNumber(D_mm, 0);
+        const heightElement = document.getElementById('vesselHeight');
+        if (heightElement) {
+            heightElement.textContent = formatNumber(H_mm, 0);
+        }
+        document.getElementById('minArea').textContent = formatNumber(A_min, 4);
+
+        // 10. 更新 SVG 示意图
+        updateSteamDiagram(D_mm, H_mm, x_in, m_liquid_separated_kg_h / m_total_kg_h);
+
+        // 11. 显示成功消息
+        showStatus(
+            `计算完成！推荐容器直径: ${formatNumber(D_mm, 0)} mm，最大允许气速: ${formatNumber(v_max, 3)} m/s`,
+            'success',
+            'statusSteam'
+        );
+
+    } catch (error) {
+        console.error('计算错误:', error);
+        showStatus('错误: ' + error.message, 'error', 'statusSteam');
+        
+        // 清空结果显示
+        document.getElementById('saturationTemp').textContent = '-';
+        document.getElementById('liquidDensitySteam').textContent = '-';
+        document.getElementById('vaporDensitySteam').textContent = '-';
+        document.getElementById('separatedLiquidFlow').textContent = '-';
+        document.getElementById('drySteamFlow').textContent = '-';
+        document.getElementById('maxVelocity').textContent = '-';
+        document.getElementById('vesselDiameter').textContent = '-';
+        const heightElement = document.getElementById('vesselHeight');
+        if (heightElement) {
+            heightElement.textContent = '-';
+        }
+        document.getElementById('minArea').textContent = '-';
+    } finally {
+        // 恢复计算按钮
+        const calcBtn = document.getElementById('calculateBtnSteam');
+        calcBtn.disabled = false;
+        calcBtn.textContent = '计算';
+    }
+}
+
+// 更新水蒸汽立式 SVG 示意图
+function updateSteamDiagram(diameter_mm, height_mm, inletDryness, liquidRatio) {
+    const svg = document.getElementById('steamDiagram');
+    if (!svg) return;
+
+    const svgWidth = 400;
+    const svgHeight = 500;
+    const tankX = 150;
+    const tankY = 50;
+    const tankWidth = 100;
+    const tankHeight = 400;
+
+    // 根据液体比例计算液位高度
+    // liquidRatio: 分离后的液体占总流量的比例
+    const liquidHeight = tankHeight * Math.min(1.0, Math.max(0.0, liquidRatio));
+    const liquidTopY = tankY + tankHeight - liquidHeight;
+
+    // 更新容器主体（如果需要调整尺寸）
+    const tankBody = document.getElementById('steamTankBody');
+    if (tankBody) {
+        // 保持容器尺寸不变，只更新位置
+    }
+
+    // 更新液体区域
+    const liquidArea = document.getElementById('steamLiquidArea');
+    if (liquidArea) {
+        liquidArea.setAttribute('x', tankX);
+        liquidArea.setAttribute('y', liquidTopY);
+        liquidArea.setAttribute('width', tankWidth);
+        liquidArea.setAttribute('height', liquidHeight);
+        if (liquidHeight > 0) {
+            liquidArea.setAttribute('rx', '5');
+        } else {
+            liquidArea.setAttribute('rx', '0');
+        }
+    }
+
+    // 更新液位线
+    const liquidLevel = document.getElementById('steamLiquidLevel');
+    if (liquidLevel) {
+        liquidLevel.setAttribute('x1', tankX);
+        liquidLevel.setAttribute('y1', liquidTopY);
+        liquidLevel.setAttribute('x2', tankX + tankWidth);
+        liquidLevel.setAttribute('y2', liquidTopY);
+        if (liquidHeight <= 0) {
+            liquidLevel.style.display = 'none';
+        } else {
+            liquidLevel.style.display = 'block';
+        }
+    }
+
+    // 更新直径标注（水平标注）
+    const diameterLabel = document.getElementById('steamDiameterLabel');
+    if (diameterLabel) {
+        diameterLabel.textContent = `内径 D = ${formatNumber(diameter_mm, 0)} mm`;
+    }
+    
+    // 更新气分高度标注
+    const heightLabel = document.getElementById('steamHeightLabel');
+    if (heightLabel) {
+        heightLabel.textContent = `推荐高度 H = ${formatNumber(height_mm, 0)} mm`;
+    }
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
     // 类型切换功能
     const verticalBtn = document.getElementById('verticalBtn');
     const horizontalBtn = document.getElementById('horizontalBtn');
+    const steamBtn = document.getElementById('steamBtn');
     const verticalContent = document.getElementById('verticalContent');
     const horizontalContent = document.getElementById('horizontalContent');
+    const steamContent = document.getElementById('steamContent');
 
     verticalBtn.addEventListener('click', () => {
         verticalBtn.classList.add('active');
         horizontalBtn.classList.remove('active');
+        steamBtn.classList.remove('active');
         verticalContent.style.display = 'block';
         horizontalContent.style.display = 'none';
+        steamContent.style.display = 'none';
     });
 
     horizontalBtn.addEventListener('click', () => {
         horizontalBtn.classList.add('active');
         verticalBtn.classList.remove('active');
+        steamBtn.classList.remove('active');
         horizontalContent.style.display = 'block';
         verticalContent.style.display = 'none';
+        steamContent.style.display = 'none';
+    });
+
+    steamBtn.addEventListener('click', () => {
+        steamBtn.classList.add('active');
+        verticalBtn.classList.remove('active');
+        horizontalBtn.classList.remove('active');
+        steamContent.style.display = 'block';
+        verticalContent.style.display = 'none';
+        horizontalContent.style.display = 'none';
     });
 
     // 绑定计算按钮事件
@@ -1189,6 +1509,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const calcBtnH = document.getElementById('calculateBtnH');
     calcBtnH.addEventListener('click', calculateHorizontal);
+    
+    const calcBtnSteam = document.getElementById('calculateBtnSteam');
+    if (calcBtnSteam) {
+        calcBtnSteam.addEventListener('click', calculateSteam);
+    }
 
     // 绑定回车键事件（在输入框中按回车也可以计算）
     const inputFields = document.querySelectorAll('.input-field');
@@ -1197,9 +1522,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.key === 'Enter') {
                 // 根据当前显示的内容区域决定调用哪个计算函数
                 if (verticalContent.style.display !== 'none') {
-                calculate();
+                    calculate();
                 } else if (horizontalContent.style.display !== 'none') {
                     calculateHorizontal();
+                } else if (steamContent && steamContent.style.display !== 'none') {
+                    calculateSteam();
                 }
             }
         });
@@ -1291,6 +1618,29 @@ document.addEventListener('DOMContentLoaded', () => {
         liquidLevelRatioGroup.style.display = 'block';
         ksValueGroup.style.display = 'block';
         velocityMultiplierGroup.style.display = 'none';
+    }
+
+    // K值输入框变化时更新丝网规格提示
+    const kFactorInput = document.getElementById('kFactor');
+    if (kFactorInput) {
+        // 初始化时显示默认K值的规格
+        updateMeshSpecInfo(parseFloat(kFactorInput.value) || 0.15);
+        
+        // 监听输入变化
+        kFactorInput.addEventListener('input', (e) => {
+            const K = parseFloat(e.target.value);
+            if (!isNaN(K)) {
+                updateMeshSpecInfo(K);
+            }
+        });
+        
+        // 监听值变化（包括通过步进按钮改变）
+        kFactorInput.addEventListener('change', (e) => {
+            const K = parseFloat(e.target.value);
+            if (!isNaN(K)) {
+                updateMeshSpecInfo(K);
+            }
+        });
     }
 
     // 预初始化 CoolProp

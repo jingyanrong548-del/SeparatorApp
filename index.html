@@ -16,8 +16,9 @@
         <!-- 类型选择器 -->
         <section class="type-selector-section">
             <div class="type-selector">
-                <button id="verticalBtn" class="type-btn active">立式</button>
-                <button id="horizontalBtn" class="type-btn">卧式</button>
+                <button id="verticalBtn" class="type-btn active">制冷立式</button>
+                <button id="horizontalBtn" class="type-btn">制冷卧式</button>
+                <button id="steamBtn" class="type-btn">水蒸汽立式</button>
             </div>
         </section>
 
@@ -32,7 +33,7 @@
                         class="separator-diagram"
                         loading="lazy"
                     />
-                    <p class="diagram-caption">立式气液分离器结构示意图</p>
+                    <p class="diagram-caption">制冷立式气液分离器结构示意图</p>
                 </div>
             </section>
 
@@ -180,15 +181,15 @@
                 <div class="diagram-container">
                     <img 
                         src="/horizontal-separator-diagram.png" 
-                        alt="卧式气液分离器结构示意图" 
+                        alt="制冷卧式气液分离器结构示意图" 
                         class="separator-diagram"
                         loading="lazy"
                         onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
                     />
                     <div style="display: none; padding: 20px; text-align: center; color: #66757f;">
-                        <p>请将卧式气液分离器结构示意图放置在 <code>public/horizontal-separator-diagram.png</code></p>
+                        <p>请将制冷卧式气液分离器结构示意图放置在 <code>public/horizontal-separator-diagram.png</code></p>
                     </div>
-                    <p class="diagram-caption">卧式气液分离器结构示意图</p>
+                    <p class="diagram-caption">制冷卧式气液分离器结构示意图</p>
                 </div>
             </section>
 
@@ -332,7 +333,7 @@
                             <line id="diameterLine" x1="40" y1="80" x2="40" y2="220" stroke="#1976d2" stroke-width="2" marker-end="url(#arrowhead)" marker-start="url(#arrowhead)"/>
                             <text id="diameterLabel" x="15" y="150" text-anchor="middle" font-size="14" fill="#1976d2" font-weight="bold">D = - mm</text>
                         </svg>
-                        <p class="diagram-caption">卧式气液分离器结构示意图</p>
+                        <p class="diagram-caption">制冷卧式气液分离器结构示意图</p>
                     </div>
 
                     <div class="results-grid" id="resultsContainerH">
@@ -385,6 +386,164 @@
                             <span class="result-label">筒内容积</span>
                             <span class="result-value" id="volumeH">-</span>
                             <span class="result-unit">L</span>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- 水蒸汽立式内容 -->
+        <div id="steamContent" class="separator-content" style="display: none;">
+            <main class="main-content">
+                <!-- 左侧：参数输入区 -->
+                <section class="input-section">
+                    <h2>输入参数</h2>
+                    <div class="form-group">
+                        <label for="inletPressure">入口压力 P_in (MPa)</label>
+                        <input type="number" id="inletPressure" class="input-field" value="1.0" step="0.1" min="0.1" max="10.0">
+                        <small class="hint">推荐范围: 0.1 - 10.0 MPa</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inletDryness">入口干度 x_in</label>
+                        <input type="number" id="inletDryness" class="input-field" value="0.95" step="0.01" min="0.0" max="1.0">
+                        <small class="hint">范围: 0.0 (饱和液体) - 1.0 (饱和蒸汽)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="massFlowRate">总质量流量 m_total (kg/h)</label>
+                        <input type="number" id="massFlowRate" class="input-field" value="1000" step="10" min="1">
+                        <small class="hint">入口总质量流量</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="separationEfficiency">目标分离效率 (%)</label>
+                        <input type="number" id="separationEfficiency" class="input-field" value="99.5" step="0.1" min="90" max="99.99">
+                        <small class="hint">推荐范围: 95% - 99.9% (默认 99.5%)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="kFactor">Souders-Brown 系数 K</label>
+                        <input type="number" id="kFactor" class="input-field" value="0.15" step="0.01" min="0.05" max="0.3">
+                        <small class="hint">推荐范围: 0.10 - 0.20 (默认 0.15，适用于丝网除沫器)</small>
+                        <div id="meshSpecInfo" style="margin-top: 10px; padding: 12px; background: #e3f2fd; border-radius: 6px; border-left: 4px solid #1976d2; display: none;">
+                            <div style="font-weight: 600; color: #1976d2; margin-bottom: 8px;">推荐不锈钢丝网规格：</div>
+                            <div id="meshSpecDetails" style="font-size: 0.9rem; color: #424242; line-height: 1.6;"></div>
+                        </div>
+                    </div>
+
+                    <button id="calculateBtnSteam" class="calculate-btn">计算</button>
+                </section>
+
+                <!-- 右侧：计算结果区 -->
+                <section class="result-section">
+                    <h2>计算结果</h2>
+                    <div id="statusSteam" class="status-message"></div>
+                    
+                    <!-- SVG示意图 -->
+                    <div class="diagram-svg-container">
+                        <svg id="steamDiagram" class="separator-svg" viewBox="0 0 400 500" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <!-- 容器渐变 -->
+                                <linearGradient id="steamTankGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#e3f2fd;stop-opacity:1" />
+                                    <stop offset="50%" style="stop-color:#bbdefb;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#90caf9;stop-opacity:1" />
+                                </linearGradient>
+                                <!-- 液体渐变 -->
+                                <linearGradient id="steamLiquidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#e1f5fe;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#b3e5fc;stop-opacity:1" />
+                                </linearGradient>
+                                <!-- 蒸汽渐变 -->
+                                <linearGradient id="steamVaporGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#fff3e0;stop-opacity:0.3" />
+                                    <stop offset="100%" style="stop-color:#ffe0b2;stop-opacity:0.5" />
+                                </linearGradient>
+                                <!-- 箭头标记 -->
+                                <marker id="steamArrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                    <polygon points="0 0, 10 3, 0 6" fill="#1976d2"/>
+                                </marker>
+                            </defs>
+                            <!-- 容器主体 -->
+                            <rect id="steamTankBody" x="150" y="50" width="100" height="400" fill="url(#steamTankGradient)" stroke="#1976d2" stroke-width="3" rx="5"/>
+                            <!-- 液体区域 -->
+                            <rect id="steamLiquidArea" x="150" y="400" width="100" height="0" fill="url(#steamLiquidGradient)" stroke="#0277bd" stroke-width="2" rx="5"/>
+                            <!-- 液位线 -->
+                            <line id="steamLiquidLevel" x1="150" y1="400" x2="250" y2="400" stroke="#0277bd" stroke-width="2.5" stroke-dasharray="6,4"/>
+                            <!-- 不锈钢丝网区域（位于容器上部，蒸汽出口下方） -->
+                            <rect id="steamMeshPad" x="145" y="120" width="110" height="15" fill="#ff9800" fill-opacity="0.3" stroke="#ff6f00" stroke-width="2" stroke-dasharray="3,2"/>
+                            <text x="200" y="132" text-anchor="middle" font-size="11" fill="#e65100" font-weight="bold">不锈钢丝网</text>
+                            <!-- 入口管道（位于丝网下方） -->
+                            <line id="steamInletLine" x1="200" y1="200" x2="200" y2="135" stroke="#1976d2" stroke-width="4"/>
+                            <polygon id="steamInletArrow" points="195,145 200,135 205,145" fill="#1976d2"/>
+                            <text x="200" y="220" text-anchor="middle" font-size="12" fill="#1976d2" font-weight="bold">入口</text>
+                            <!-- 蒸汽出口（位于丝网上方） -->
+                            <line x1="250" y1="100" x2="280" y2="100" stroke="#1976d2" stroke-width="4"/>
+                            <polygon points="275,95 280,100 275,105" fill="#1976d2"/>
+                            <text x="290" y="105" font-size="12" fill="#1976d2" font-weight="bold">干蒸汽</text>
+                            <!-- 液体出口 -->
+                            <line x1="200" y1="450" x2="200" y2="470" stroke="#0277bd" stroke-width="4"/>
+                            <polygon points="195,465 200,470 205,465" fill="#0277bd"/>
+                            <text x="200" y="485" text-anchor="middle" font-size="12" fill="#0277bd" font-weight="bold">液体出口</text>
+                            <!-- 尺寸标注 - 直径（水平标注，更清晰） -->
+                            <line id="steamDiameterLine" x1="150" y1="480" x2="250" y2="480" stroke="#1976d2" stroke-width="2" marker-end="url(#steamArrowhead)" marker-start="url(#steamArrowhead)"/>
+                            <text id="steamDiameterLabel" x="200" y="500" text-anchor="middle" font-size="12" fill="#1976d2" font-weight="bold">内径 D = - mm</text>
+                            <!-- 气分高度标注 -->
+                            <line id="steamHeightLine" x1="260" y1="50" x2="260" y2="450" stroke="#2e7d32" stroke-width="2" marker-end="url(#steamArrowhead)" marker-start="url(#steamArrowhead)"/>
+                            <text id="steamHeightLabel" x="275" y="250" text-anchor="middle" font-size="12" fill="#2e7d32" font-weight="bold" transform="rotate(-90 275 250)">推荐高度 H = - mm</text>
+                            <!-- 丝网位置标注 -->
+                            <line id="steamMeshLine" x1="100" y1="127.5" x2="145" y2="127.5" stroke="#ff6f00" stroke-width="2" stroke-dasharray="4,2"/>
+                            <text x="80" y="132" text-anchor="middle" font-size="11" fill="#e65100" font-weight="bold">丝网位置</text>
+                        </svg>
+                        <p class="diagram-caption">水蒸汽立式结构示意图</p>
+                    </div>
+
+                    <div class="results-grid" id="resultsContainerSteam">
+                        <div class="result-item">
+                            <span class="result-label">饱和温度 T_sat</span>
+                            <span class="result-value" id="saturationTemp">-</span>
+                            <span class="result-unit">°C</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">液体密度 ρ_l</span>
+                            <span class="result-value" id="liquidDensitySteam">-</span>
+                            <span class="result-unit">kg/m³</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">蒸汽密度 ρ_v</span>
+                            <span class="result-value" id="vaporDensitySteam">-</span>
+                            <span class="result-unit">kg/m³</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">分离后液体流量</span>
+                            <span class="result-value" id="separatedLiquidFlow">-</span>
+                            <span class="result-unit">kg/h</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">干蒸汽流量</span>
+                            <span class="result-value" id="drySteamFlow">-</span>
+                            <span class="result-unit">kg/h</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">最大允许气速 v_max</span>
+                            <span class="result-value" id="maxVelocity">-</span>
+                            <span class="result-unit">m/s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">推荐容器直径 D</span>
+                            <span class="result-value" id="vesselDiameter">-</span>
+                            <span class="result-unit">mm</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">推荐气分高度 H</span>
+                            <span class="result-value" id="vesselHeight">-</span>
+                            <span class="result-unit">mm</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">最小流通面积</span>
+                            <span class="result-value" id="minArea">-</span>
+                            <span class="result-unit">m²</span>
                         </div>
                     </div>
                 </section>
