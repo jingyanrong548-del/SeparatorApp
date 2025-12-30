@@ -3,42 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>立式气液分离器选型计算器</title>
+    <title>气液分离器选型计算器</title>
     <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>立式气液分离器选型计算器</h1>
-            <p class="subtitle">Vertical Suction Accumulator Sizing Calculator</p>
+            <h1>气液分离器选型计算器</h1>
+            <p class="subtitle">Gas-Liquid Separator Sizing Calculator</p>
         </header>
 
-        <!-- 气液分离器示意图 -->
-        <section class="diagram-section">
-            <div class="diagram-container">
-                <img 
-                    src="https://encrypted-tbn0.gstatic.com/licensed-image?q=tbn:ANd9GcT-yxP-vVbsG-Sk1GQ6O2WYODWIw94D1RWfOw2pItIquJKHkNeoe-Wc_cngDOgoXfuP2YbSNUFNWIerYUOzwn7cAVystGpG_jBvKNIsf-5tzA3r7UU" 
-                    alt="立式气液分离器结构示意图" 
-                    class="separator-diagram"
-                    loading="lazy"
-                />
-                <p class="diagram-caption">立式气液分离器结构示意图</p>
+        <!-- 类型选择器 -->
+        <section class="type-selector-section">
+            <div class="type-selector">
+                <button id="verticalBtn" class="type-btn active">立式</button>
+                <button id="horizontalBtn" class="type-btn">卧式</button>
             </div>
         </section>
 
-        <main class="main-content">
+        <!-- 立式气液分离器内容 -->
+        <div id="verticalContent" class="separator-content">
+            <!-- 气液分离器示意图 -->
+            <section class="diagram-section">
+                <div class="diagram-container">
+                    <img 
+                        src="https://encrypted-tbn0.gstatic.com/licensed-image?q=tbn:ANd9GcT-yxP-vVbsG-Sk1GQ6O2WYODWIw94D1RWfOw2pItIquJKHkNeoe-Wc_cngDOgoXfuP2YbSNUFNWIerYUOzwn7cAVystGpG_jBvKNIsf-5tzA3r7UU" 
+                        alt="立式气液分离器结构示意图" 
+                        class="separator-diagram"
+                        loading="lazy"
+                    />
+                    <p class="diagram-caption">立式气液分离器结构示意图</p>
+                </div>
+            </section>
+
+            <main class="main-content">
             <!-- 左侧：参数输入区 -->
             <section class="input-section">
                 <h2>输入参数</h2>
                 <div class="form-group">
                     <label for="refrigerant">制冷剂类型</label>
                     <select id="refrigerant" class="input-field">
-                        <option value="R134a">R134a</option>
-                        <option value="R245fa">R245fa</option>
-                        <option value="R1234ze(E)">R1234ze(E)</option>
-                        <option value="R410A">R410A</option>
-                        <option value="Ammonia">Ammonia</option>
-                        <option value="R290">R290</option>
+                        <optgroup label="低温制冷剂 (蒸发温度 < -20°C)">
+                            <option value="R23">R23 (HFC-23)</option>
+                            <option value="R508B">R508B (HFC-508B)</option>
+                            <option value="R170">R170 (Ethane)</option>
+                            <option value="R1150">R1150 (Ethylene)</option>
+                        </optgroup>
+                        <optgroup label="中温制冷剂 (-20°C ~ 10°C)">
+                            <option value="R134a" selected>R134a (HFC-134a)</option>
+                            <option value="R404A">R404A (HFC-404A)</option>
+                            <option value="R407C">R407C (HFC-407C)</option>
+                            <option value="R507A">R507A (HFC-507A)</option>
+                            <option value="R22">R22 (HCFC-22)</option>
+                            <option value="R1234ze(E)">R1234ze(E) (HFO-1234ze)</option>
+                            <option value="R1234yf">R1234yf (HFO-1234yf)</option>
+                            <option value="R32">R32 (HFC-32)</option>
+                            <option value="R290">R290 (Propane)</option>
+                            <option value="R600a">R600a (Isobutane)</option>
+                            <option value="R410A">R410A (HFC-410A)</option>
+                        </optgroup>
+                        <optgroup label="高温制冷剂 (蒸发温度 > 10°C)">
+                            <option value="R245fa">R245fa (HFC-245fa)</option>
+                            <option value="R123">R123 (HCFC-123)</option>
+                            <option value="R236fa">R236fa (HFC-236fa)</option>
+                            <option value="R365mfc">R365mfc (HFC-365mfc)</option>
+                            <option value="R717">R717 (Ammonia)</option>
+                        </optgroup>
                     </select>
                 </div>
 
@@ -60,8 +90,9 @@
                 <div class="form-group">
                     <label for="calcMode">计算模式</label>
                     <select id="calcMode" class="input-field">
-                        <option value="auto">自动计算（基于终端速度）</option>
-                        <option value="manual">手动输入设计气速</option>
+                        <option value="auto">自动计算直径（选型模式）</option>
+                        <option value="manual-velocity">手动输入设计气速</option>
+                        <option value="manual-diameter">手动输入直径（校核模式）</option>
                     </select>
                 </div>
 
@@ -77,7 +108,13 @@
                     <small class="hint">推荐范围: 0.5 - 1.0 m/s</small>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" id="diameterInputGroup" style="display: none;">
+                    <label for="diameterInput">筒身内径 D (mm)</label>
+                    <input type="number" id="diameterInput" class="input-field" value="200" step="10" min="50" max="2000">
+                    <small class="hint">输入标准直径或已有设备直径</small>
+                </div>
+
+                <div class="form-group" id="velocityRatioGroup">
                     <label for="velocityRatio">设计气速系数</label>
                     <input type="number" id="velocityRatio" class="input-field" value="0.75" step="0.05" min="0.5" max="0.9">
                     <small class="hint">设计气速 = 系数 × 终端速度 (推荐: 0.75 - 0.9)</small>
@@ -133,7 +170,198 @@
                     </div>
                 </div>
             </section>
-        </main>
+            </main>
+        </div>
+
+        <!-- 卧式气液分离器内容 -->
+        <div id="horizontalContent" class="separator-content" style="display: none;">
+            <main class="main-content">
+                <!-- 左侧：参数输入区 -->
+                <section class="input-section">
+                    <h2>输入参数</h2>
+                    <div class="form-group">
+                        <label for="refrigerantH">制冷剂类型</label>
+                        <select id="refrigerantH" class="input-field">
+                            <optgroup label="低温制冷剂 (蒸发温度 < -20°C)">
+                                <option value="R23">R23 (HFC-23)</option>
+                                <option value="R508B">R508B (HFC-508B)</option>
+                                <option value="R170">R170 (Ethane)</option>
+                                <option value="R1150">R1150 (Ethylene)</option>
+                            </optgroup>
+                            <optgroup label="中温制冷剂 (-20°C ~ 10°C)">
+                                <option value="R134a" selected>R134a (HFC-134a)</option>
+                                <option value="R404A">R404A (HFC-404A)</option>
+                                <option value="R407C">R407C (HFC-407C)</option>
+                                <option value="R507A">R507A (HFC-507A)</option>
+                                <option value="R22">R22 (HCFC-22)</option>
+                                <option value="R1234ze(E)">R1234ze(E) (HFO-1234ze)</option>
+                                <option value="R1234yf">R1234yf (HFO-1234yf)</option>
+                                <option value="R32">R32 (HFC-32)</option>
+                                <option value="R290">R290 (Propane)</option>
+                                <option value="R600a">R600a (Isobutane)</option>
+                                <option value="R410A">R410A (HFC-410A)</option>
+                            </optgroup>
+                            <optgroup label="高温制冷剂 (蒸发温度 > 10°C)">
+                                <option value="R245fa">R245fa (HFC-245fa)</option>
+                                <option value="R123">R123 (HCFC-123)</option>
+                                <option value="R236fa">R236fa (HFC-236fa)</option>
+                                <option value="R365mfc">R365mfc (HFC-365mfc)</option>
+                                <option value="R717">R717 (Ammonia)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="coolingCapacityH">制冷量 Q (kW)</label>
+                        <input type="number" id="coolingCapacityH" class="input-field" value="100" step="0.1" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="evapTempH">蒸发温度 Te (°C)</label>
+                        <input type="number" id="evapTempH" class="input-field" value="5" step="0.1">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="superheatH">吸气过热度 ΔT_sh (K)</label>
+                        <input type="number" id="superheatH" class="input-field" value="5" step="0.1" min="0">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="calcModeH">计算模式</label>
+                        <select id="calcModeH" class="input-field">
+                            <option value="auto">自动计算直径（选型模式）</option>
+                            <option value="manual-diameter">手动输入直径（校核模式）</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="lengthDiameterRatioGroup">
+                        <label for="lengthDiameterRatio">长径比 L/D</label>
+                        <input type="number" id="lengthDiameterRatio" class="input-field" value="3.0" step="0.1" min="2.0" max="6.0">
+                        <small class="hint">推荐范围: 2.0 - 6.0 (默认 3.0)</small>
+                    </div>
+
+                    <div class="form-group" id="diameterInputGroupH" style="display: none;">
+                        <label for="diameterInputH">筒身内径 D (mm)</label>
+                        <input type="number" id="diameterInputH" class="input-field" value="200" step="10" min="50" max="2000">
+                        <small class="hint">输入标准直径或已有设备直径</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="liquidLevelRatio">设计液位高度比 H_liq/D</label>
+                        <input type="number" id="liquidLevelRatio" class="input-field" value="0.3" step="0.05" min="0.1" max="0.5">
+                        <small class="hint">推荐范围: 0.1 - 0.5 (默认 0.3，即30%液位)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="ksValue">Souders-Brown 系数 Ks (m/s)</label>
+                        <input type="number" id="ksValue" class="input-field" value="0.07" step="0.01" min="0.05" max="0.15">
+                        <small class="hint">推荐范围: 0.05 - 0.15 m/s (默认 0.07 m/s)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="velocityMultiplier">水平气速倍数 (vh/vt)</label>
+                        <input type="number" id="velocityMultiplier" class="input-field" value="3.0" step="0.5" min="1.0" max="5.0">
+                        <small class="hint">推荐范围: 1.0 - 5.0 (默认 3.0，即 vh = 3 × vt)</small>
+                    </div>
+
+                    <button id="calculateBtnH" class="calculate-btn">计算</button>
+                </section>
+
+                <!-- 右侧：计算结果区 -->
+                <section class="result-section">
+                    <h2>计算结果</h2>
+                    <div id="statusH" class="status-message"></div>
+                    
+                    <!-- SVG示意图 -->
+                    <div class="diagram-svg-container">
+                        <svg id="horizontalDiagram" class="separator-svg" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <!-- 箭头标记 -->
+                                <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                    <polygon points="0 0, 10 3, 0 6" fill="#1976d2"/>
+                                </marker>
+                                <marker id="arrowhead-gray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                    <polygon points="0 0, 10 3, 0 6" fill="#757575"/>
+                                </marker>
+                                <marker id="arrowhead-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                    <polygon points="0 0, 10 3, 0 6" fill="#d32f2f"/>
+                                </marker>
+                            </defs>
+                            <!-- 筒身 -->
+                            <rect id="tankBody" x="80" y="80" width="440" height="140" fill="#e3f2fd" stroke="#1976d2" stroke-width="3" rx="8"/>
+                            <!-- 液体区域 -->
+                            <rect id="liquidArea" x="80" y="220" width="440" height="0" fill="#e1f5fe" stroke="#0277bd" stroke-width="2" rx="8" ry="8"/>
+                            <!-- 液位线 -->
+                            <line id="liquidLevel" x1="80" y1="220" x2="520" y2="220" stroke="#0277bd" stroke-width="2.5" stroke-dasharray="6,4"/>
+                            <!-- 气体流向箭头 -->
+                            <g id="gasFlowArrows"></g>
+                            <!-- 液滴沉降轨迹 -->
+                            <path id="dropletPath" d="" stroke="#d32f2f" stroke-width="2" stroke-dasharray="4,3" fill="none" opacity="0.8"/>
+                            <!-- 尺寸标注 - 长度 -->
+                            <line id="lengthLine" x1="80" y1="250" x2="520" y2="250" stroke="#1976d2" stroke-width="2" marker-end="url(#arrowhead)" marker-start="url(#arrowhead)"/>
+                            <text id="lengthLabel" x="300" y="270" text-anchor="middle" font-size="14" fill="#1976d2" font-weight="bold">L = - mm</text>
+                            <!-- 尺寸标注 - 直径 -->
+                            <line id="diameterLine" x1="40" y1="80" x2="40" y2="220" stroke="#1976d2" stroke-width="2" marker-end="url(#arrowhead)" marker-start="url(#arrowhead)"/>
+                            <text id="diameterLabel" x="15" y="150" text-anchor="middle" font-size="14" fill="#1976d2" font-weight="bold">D = - mm</text>
+                        </svg>
+                        <p class="diagram-caption">卧式气液分离器结构示意图</p>
+                    </div>
+
+                    <div class="results-grid" id="resultsContainerH">
+                        <div class="result-item">
+                            <span class="result-label">质量流量</span>
+                            <span class="result-value" id="massFlowH">-</span>
+                            <span class="result-unit">kg/s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">气体密度</span>
+                            <span class="result-value" id="gasDensityH">-</span>
+                            <span class="result-unit">kg/m³</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">液体密度</span>
+                            <span class="result-value" id="liquidDensityH">-</span>
+                            <span class="result-unit">kg/m³</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">沉降速度 vt</span>
+                            <span class="result-value" id="terminalVelocityH">-</span>
+                            <span class="result-unit">m/s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">筒身内径 D</span>
+                            <span class="result-value" id="diameterH">-</span>
+                            <span class="result-unit">mm</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">筒身长度 L</span>
+                            <span class="result-value" id="lengthH">-</span>
+                            <span class="result-unit">mm</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">水平气速 vh</span>
+                            <span class="result-value" id="horizontalVelocityH">-</span>
+                            <span class="result-unit">m/s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">防夹带速度 Vre</span>
+                            <span class="result-value" id="reentrainmentVelocityH">-</span>
+                            <span class="result-unit">m/s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">液体停留时间</span>
+                            <span class="result-value" id="residenceTimeH">-</span>
+                            <span class="result-unit">s</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">筒内容积</span>
+                            <span class="result-value" id="volumeH">-</span>
+                            <span class="result-unit">L</span>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
     </div>
 
     <!-- 加载应用代码 -->
