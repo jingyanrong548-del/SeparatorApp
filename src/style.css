@@ -57,6 +57,52 @@ header h1 {
     letter-spacing: 1px;
 }
 
+/* 示意图区域样式 */
+.diagram-section {
+    margin-bottom: 30px;
+    background: var(--white);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    text-align: center;
+}
+
+.diagram-container {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+.separator-diagram {
+    max-width: 100%;
+    height: auto;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    background: var(--light-gray);
+    padding: 10px;
+}
+
+.diagram-caption {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    font-style: italic;
+    margin: 0;
+}
+
+@media (max-width: 768px) {
+    .separator-diagram {
+        max-height: 250px;
+    }
+    
+    .diagram-caption {
+        font-size: 0.85rem;
+    }
+}
+
 .main-content {
     display: grid;
     grid-template-columns: 1fr 1fr;
