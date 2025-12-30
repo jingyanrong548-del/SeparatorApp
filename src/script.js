@@ -12,18 +12,14 @@ async function initCoolProp() {
 
     try {
         // Module 是一个异步函数
+        // 导入 WASM 文件 URL
+        const wasmUrl = new URL('./coolprop.wasm', import.meta.url).href;
+        
         const moduleConfig = {
             locateFile: (path) => {
                 // 确保 wasm 文件路径正确
                 if (path.endsWith('.wasm')) {
-                    // 在开发环境中，使用相对路径
-                    // 在生产环境中，Vite 会处理路径
-                    if (import.meta.env.DEV) {
-                        return '/src/coolprop.wasm';
-                    } else {
-                        // 生产环境：WASM 文件在 assets 目录
-                        return '/assets/coolprop.wasm';
-                    }
+                    return wasmUrl;
                 }
                 return path;
             },
