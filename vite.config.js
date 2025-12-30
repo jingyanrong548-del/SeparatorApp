@@ -22,16 +22,19 @@ export default defineConfig({
     // 确保 WASM 文件被正确处理
     rollupOptions: {
       output: {
-        // 保持 WASM 文件在根目录
+        // WASM 文件保持原文件名（不添加 hash）
         assetFileNames: (assetInfo) => {
           if (assetInfo.name && assetInfo.name.endsWith('.wasm')) {
-            return '[name][extname]';
+            return 'assets/[name][extname]';
           }
           return 'assets/[name]-[hash][extname]';
         }
       }
     }
   },
+  
+  // 确保 WASM 文件被正确复制
+  assetsInclude: ['**/*.wasm'],
   
   // 优化配置
   optimizeDeps: {

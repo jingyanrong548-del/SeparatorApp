@@ -1,23 +1,8 @@
+// 导入 CoolProp Module
+import Module from './coolprop.js';
+
 // CoolProp Module 实例
 let CoolPropModule = null;
-
-// 等待 CoolProp Module 可用（从全局变量获取）
-function waitForModule(maxAttempts = 50, interval = 100) {
-    return new Promise((resolve, reject) => {
-        let attempts = 0;
-        const checkModule = () => {
-            if (typeof Module !== 'undefined') {
-                resolve();
-            } else if (attempts < maxAttempts) {
-                attempts++;
-                setTimeout(checkModule, interval);
-            } else {
-                reject(new Error('CoolProp Module 加载超时，请确保 coolprop.js 已正确加载'));
-            }
-        };
-        checkModule();
-    });
-}
 
 // 等待 CoolProp 初始化
 async function initCoolProp() {
@@ -26,15 +11,19 @@ async function initCoolProp() {
     }
 
     try {
-        // 等待 Module 全局变量可用
-        await waitForModule();
-
-        // Module 是一个异步函数（从全局变量获取）
+        // Module 是一个异步函数
         const moduleConfig = {
             locateFile: (path) => {
-                // 确保 wasm 文件路径正确（Vite 中 public 目录的文件通过根路径访问）
+                // 确保 wasm 文件路径正确
                 if (path.endsWith('.wasm')) {
-                    return '/coolprop.wasm';
+                    // 在开发环境中，使用相对路径
+                    // 在生产环境中，Vite 会处理路径
+                    if (import.meta.env.DEV) {
+                        return '/src/coolprop.wasm';
+                    } else {
+                        // 生产环境：WASM 文件在 assets 目录
+                        return '/assets/coolprop.wasm';
+                    }
                 }
                 return path;
             },
@@ -43,7 +32,6 @@ async function initCoolProp() {
             }
         };
 
-        // 使用全局 Module 变量
         CoolPropModule = await Module(moduleConfig);
         CoolPropModule.ready = true;
         return CoolPropModule;
