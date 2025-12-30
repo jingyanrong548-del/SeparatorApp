@@ -13,6 +13,7 @@
 
 ## 技术栈
 
+- **Vite** - 现代化构建工具
 - HTML5
 - CSS3 (Flexbox/Grid 布局)
 - Vanilla JavaScript (ES6 模块)
@@ -38,18 +39,23 @@
 
 ## 使用方法
 
-### 本地运行
-
-由于使用 ES6 模块，需要通过 HTTP 服务器运行：
+### 开发环境
 
 ```bash
-# 方法 1: Python 简单服务器
-python3 -m http.server 8000
-# 然后访问 http://localhost:8000
+# 安装依赖
+npm install
 
-# 方法 2: Node.js http-server
-npx http-server -p 8000
+# 启动开发服务器（支持热更新）
+npm run dev
+
+# 构建生产版本
+npm run build
+
+# 预览生产构建
+npm run preview
 ```
+
+开发服务器会自动在 http://localhost:3000 打开。
 
 ### 在线访问
 
@@ -59,12 +65,17 @@ npx http-server -p 8000
 
 ```
 SeparatorApp/
-├── index.html      # 主页面
-├── style.css       # 样式表
-├── script.js       # 计算逻辑
-├── coolprop.js     # CoolProp 库
-├── coolprop.wasm   # WASM 文件
-└── README.md       # 项目说明
+├── index.html          # 主页面（Vite 入口）
+├── vite.config.js      # Vite 配置文件
+├── package.json        # 项目配置和依赖
+├── vercel.json         # Vercel 部署配置
+├── src/
+│   ├── script.js      # 计算逻辑
+│   └── style.css      # 样式表
+├── public/
+│   ├── coolprop.js    # CoolProp 库
+│   └── coolprop.wasm  # WASM 文件
+└── README.md          # 项目说明
 ```
 
 ## 输入参数

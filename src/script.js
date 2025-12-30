@@ -1,5 +1,5 @@
 // 导入 CoolProp Module
-import Module from './coolprop.js';
+import Module from '/coolprop.js';
 
 // CoolProp Module 实例
 let CoolPropModule = null;
@@ -14,9 +14,9 @@ async function initCoolProp() {
         // Module 是一个异步函数
         const moduleConfig = {
             locateFile: (path) => {
-                // 确保 wasm 文件路径正确
+                // 确保 wasm 文件路径正确（Vite 中 public 目录的文件通过根路径访问）
                 if (path.endsWith('.wasm')) {
-                    return './coolprop.wasm';
+                    return '/coolprop.wasm';
                 }
                 return path;
             },
