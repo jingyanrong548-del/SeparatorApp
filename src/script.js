@@ -388,7 +388,7 @@ async function calculateHorizontal() {
             }
         }
 
-        // 转换为 mm
+        // 转换为 mm（初始值，可能会在后续调整中改变）
         let D_mm = D_m * 1000;
         let L_mm = L_m * 1000;
 
@@ -396,7 +396,7 @@ async function calculateHorizontal() {
         let Vol_m3 = Math.PI * Math.pow(D_m / 2, 2) * L_m;
         let Vol_L = Vol_m3 * 1000;
 
-        // 14. 计算液体停留时间 (简化计算)
+        // 15. 计算液体停留时间 (简化计算)
         // 注意：如果后续调整了结构参数，停留时间会在调整后重新计算
         let liquid_volume_ratio = 1 - calculateGasAreaRatio(h_liq_ratio);
         let liquid_volume_m3 = Vol_m3 * liquid_volume_ratio;
@@ -606,6 +606,18 @@ async function calculateHorizontal() {
             }
         }
 
+        // 在所有结构参数确定后，检查液滴是否能够沉降（最终验证）
+        // 计算气相高度和沉降距离
+        const H_gas_final = D_m * (1 - h_liq_ratio);
+        const S_l_final = H_gas_final;
+        
+        // 计算飞行时间和沉降时间
+        const t_fly_final = L_m / vh_display;
+        const t_fall_final = S_l_final / vt;
+        
+        // 判断液滴是否无法沉降（飞行时间小于沉降时间）
+        const cannotSettle = t_fly_final < t_fall_final;
+
         // 更新结果显示
         document.getElementById('massFlowH').textContent = formatNumber(m_dot, 3);
         document.getElementById('gasDensityH').textContent = formatNumber(rho_g, 2);
@@ -652,8 +664,8 @@ async function calculateHorizontal() {
             vreElement.textContent = formatNumber(v_max_entrainment, 3);
         }
 
-        // 更新SVG示意图
-        updateHorizontalDiagram(D_mm, L_mm, h_liq_ratio);
+        // 更新SVG示意图（使用用户要求的 updateSvg 函数）
+        updateSvg(L_mm, D_mm, h_liq_ratio, cannotSettle);
 
         // 状态消息
         if (calcModeH === 'manual-diameter') {
@@ -740,23 +752,24 @@ async function calculateHorizontal() {
 }
 
 // 绘制卧式分离器SVG示意图（增强版）
-function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
+// 参数：diameter (mm), length (mm), liquidLevelRatio (0-1), cannotSettle (boolean) - 是否无法沉降
+function drawHorizontalSeparator(diameter, length, liquidLevelRatio, cannotSettle = false) {
     const svg = document.getElementById('horizontalDiagram');
     if (!svg) return;
 
-    // SVG 画布尺寸
+    // SVG 画布尺寸（保持 viewBox 不变）
     const svgWidth = 600;
     const svgHeight = 300;
     const padding = 80;
     
-    // 计算显示比例，保持合理的显示尺寸
+    // 计算长径比
     const aspectRatio = length / diameter;
     const maxDisplayWidth = svgWidth - 2 * padding;
     const maxDisplayHeight = svgHeight - 2 * padding - 40; // 40px 用于标注
     
     let displayWidth, displayHeight;
     
-    // 根据长径比调整显示尺寸
+    // 根据长径比动态调整显示尺寸，使其视觉上接近真实比例
     if (aspectRatio > 4) {
         // 很长的分离器，宽度优先
         displayWidth = maxDisplayWidth;
@@ -785,11 +798,11 @@ function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
     const endX = startX + displayWidth;
     const endY = startY + displayHeight;
     
-    // 计算液位位置
+    // 根据 liquidLevelRatio 计算液位位置
     const liquidHeight = displayHeight * liquidLevelRatio;
     const liquidTopY = endY - liquidHeight;
     
-    // 1. 更新筒身
+    // 1. 更新筒身（根据长径比调整的尺寸）
     const tankBody = document.getElementById('tankBody');
     if (tankBody) {
         tankBody.setAttribute('x', startX);
@@ -798,16 +811,14 @@ function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
         tankBody.setAttribute('height', displayHeight);
     }
     
-    // 2. 更新液体区域（填充区域）
+    // 2. 更新液体区域（根据 liquidLevel 动态更新）
     const liquidArea = document.getElementById('liquidArea');
     if (liquidArea) {
         liquidArea.setAttribute('x', startX);
         liquidArea.setAttribute('y', liquidTopY);
         liquidArea.setAttribute('width', displayWidth);
         liquidArea.setAttribute('height', liquidHeight);
-        // 设置圆角：液体区域在底部，下边缘需要圆角
-        // SVG rect 的 rx 属性只能接受单个值，不能设置不同角的圆角
-        // 设置统一的圆角半径，让下边缘有圆角效果
+        // 设置圆角
         if (liquidHeight > 0) {
             liquidArea.setAttribute('rx', '8');
             liquidArea.setAttribute('ry', '8');
@@ -817,7 +828,7 @@ function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
         }
     }
     
-    // 3. 更新液位线
+    // 3. 更新液位线（根据 liquidLevel 动态更新 y 坐标和高度）
     const liquidLevel = document.getElementById('liquidLevel');
     if (liquidLevel) {
         liquidLevel.setAttribute('x1', startX);
@@ -860,21 +871,42 @@ function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
     }
     
     // 5. 绘制液滴沉降轨迹（红色虚线）
-    // 起点：左侧进口处（约80%高度，在气相空间）
-    // 终点：右侧液面处（刚好碰到液面）
+    // 如果无法沉降，轨迹终点画到液面之后（超出有效长度）
     const dropletPath = document.getElementById('dropletPath');
     if (dropletPath && liquidTopY > startY) {
         const startPathY = startY + (liquidTopY - startY) * 0.2; // 起点在气相空间上部
-        const endPathX = endX - 30; // 终点在右侧，接近液面
-        const endPathY = liquidTopY; // 终点刚好在液面
+        
+        let endPathX, endPathY;
+        if (cannotSettle) {
+            // 无法沉降：终点画到液面之后，超出有效长度，给用户直观警告
+            endPathX = endX + 50; // 超出筒体右侧
+            endPathY = liquidTopY + 20; // 在液面下方，表示未沉降到液面
+        } else {
+            // 正常沉降：终点刚好在液面
+            endPathX = endX - 30;
+            endPathY = liquidTopY;
+        }
         
         // 创建曲线路径（模拟抛物线轨迹）
         const controlX = (startX + endPathX) / 2;
-        const controlY = startPathY + (endPathY - startPathY) * 0.6; // 控制点，形成向下弯曲的轨迹
+        const controlY = startPathY + (endPathY - startPathY) * 0.6;
         
         const pathData = `M ${startX + 20} ${startPathY} Q ${controlX} ${controlY} ${endPathX} ${endPathY}`;
         dropletPath.setAttribute('d', pathData);
         dropletPath.style.display = 'block';
+        
+        // 如果无法沉降，使用更醒目的样式
+        if (cannotSettle) {
+            dropletPath.setAttribute('stroke', '#d32f2f');
+            dropletPath.setAttribute('stroke-width', '3');
+            dropletPath.setAttribute('stroke-dasharray', '6,3');
+            dropletPath.setAttribute('opacity', '1');
+        } else {
+            dropletPath.setAttribute('stroke', '#d32f2f');
+            dropletPath.setAttribute('stroke-width', '2');
+            dropletPath.setAttribute('stroke-dasharray', '4,3');
+            dropletPath.setAttribute('opacity', '0.8');
+        }
     } else if (dropletPath) {
         dropletPath.style.display = 'none';
     }
@@ -913,8 +945,14 @@ function drawHorizontalSeparator(diameter, length, liquidLevelRatio) {
 }
 
 // 更新卧式分离器SVG示意图（保持向后兼容）
-function updateHorizontalDiagram(D_mm, L_mm, h_ratio) {
-    drawHorizontalSeparator(D_mm, L_mm, h_ratio);
+function updateHorizontalDiagram(D_mm, L_mm, h_ratio, cannotSettle = false) {
+    drawHorizontalSeparator(D_mm, L_mm, h_ratio, cannotSettle);
+}
+
+// 更新SVG示意图（用户要求的函数名）
+// 参数：length (mm), diameter (mm), liquidLevel (0-1), cannotSettle (boolean)
+function updateSvg(length, diameter, liquidLevel, cannotSettle = false) {
+    drawHorizontalSeparator(diameter, length, liquidLevel, cannotSettle);
 }
 
 // 主计算函数（立式）

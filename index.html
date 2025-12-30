@@ -276,6 +276,17 @@
                     <div class="diagram-svg-container">
                         <svg id="horizontalDiagram" class="separator-svg" viewBox="0 0 600 300" preserveAspectRatio="xMidYMid meet">
                             <defs>
+                                <!-- 蓝色渐变 - 筒身 -->
+                                <linearGradient id="tankGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#e3f2fd;stop-opacity:1" />
+                                    <stop offset="50%" style="stop-color:#bbdefb;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#90caf9;stop-opacity:1" />
+                                </linearGradient>
+                                <!-- 液体渐变 -->
+                                <linearGradient id="liquidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#e1f5fe;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#b3e5fc;stop-opacity:1" />
+                                </linearGradient>
                                 <!-- 箭头标记 -->
                                 <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
                                     <polygon points="0 0, 10 3, 0 6" fill="#1976d2"/>
@@ -288,9 +299,9 @@
                                 </marker>
                             </defs>
                             <!-- 筒身 -->
-                            <rect id="tankBody" x="80" y="80" width="440" height="140" fill="#e3f2fd" stroke="#1976d2" stroke-width="3" rx="8"/>
+                            <rect id="tankBody" x="80" y="80" width="440" height="140" fill="url(#tankGradient)" stroke="#1976d2" stroke-width="3" rx="8"/>
                             <!-- 液体区域 -->
-                            <rect id="liquidArea" x="80" y="220" width="440" height="0" fill="#e1f5fe" stroke="#0277bd" stroke-width="2" rx="8" ry="8"/>
+                            <rect id="liquidArea" x="80" y="220" width="440" height="0" fill="url(#liquidGradient)" stroke="#0277bd" stroke-width="2" rx="8" ry="8"/>
                             <!-- 液位线 -->
                             <line id="liquidLevel" x1="80" y1="220" x2="520" y2="220" stroke="#0277bd" stroke-width="2.5" stroke-dasharray="6,4"/>
                             <!-- 气体流向箭头 -->
