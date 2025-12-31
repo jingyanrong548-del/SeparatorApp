@@ -1768,6 +1768,15 @@ async function calculate() {
         const Vol_m3 = Math.PI * Math.pow(D_m / 2, 2) * (H_mm / 1000);
         const Vol_L = Vol_m3 * 1000;
 
+        // 13. 计算液体停留时间
+        // 立式分离器：假设液体占底部10-20%的高度（取15%作为典型值）
+        const liquid_height_ratio = 0.15; // 液体高度占筒身高度的比例
+        const liquid_volume_m3 = Vol_m3 * liquid_height_ratio;
+        // 估算液体流量：假设液体流量为总质量流量的10%（粗略估算）
+        const liquid_mass_flow_kg_s = m_dot * 0.1;
+        const liquid_flow_m3_s = liquid_mass_flow_kg_s / rho_l;
+        const residence_time = liquid_volume_m3 / Math.max(liquid_flow_m3_s, 1e-6);
+
         // 更新结果显示
         document.getElementById('massFlow').textContent = formatNumber(m_dot, 3);
         document.getElementById('volumeFlow').textContent = formatNumber(V_g, 6);
@@ -1779,6 +1788,7 @@ async function calculate() {
         document.getElementById('terminalVelocity').textContent = formatNumber(vt, 3);
         document.getElementById('liquidDensity').textContent = formatNumber(rho_l, 2);
         document.getElementById('gasViscosity').textContent = formatNumber(eta_g, 6);
+        document.getElementById('residenceTime').textContent = formatNumber(residence_time, 1);
 
         // 评估设计并显示结论
         const currentVelocityRatio = calcMode === 'auto' ? velocityRatio : null;
@@ -1833,6 +1843,7 @@ async function calculate() {
         document.getElementById('terminalVelocity').textContent = '-';
         document.getElementById('liquidDensity').textContent = '-';
         document.getElementById('gasViscosity').textContent = '-';
+        document.getElementById('residenceTime').textContent = '-';
     } finally {
         // 恢复计算按钮
         const calcBtn = document.getElementById('calculateBtn');
@@ -2047,6 +2058,17 @@ async function calculateSteam() {
         const A_vessel = Math.PI * Math.pow(D_m / 2, 2); // 容器截面积 (m²)
         const v_actual = V_steam_out / A_vessel; // 实际气速 (m/s)
 
+        // 8.3 计算液体停留时间
+        // 计算容器总容积
+        const Vol_m3 = Math.PI * Math.pow(D_m / 2, 2) * (H_mm / 1000);
+        // 假设液体占底部10-20%的高度（取15%作为典型值）
+        const liquid_height_ratio = 0.15;
+        const liquid_volume_m3 = Vol_m3 * liquid_height_ratio;
+        // 计算液体流量（分离后的液体质量流量转换为体积流量）
+        const m_liquid_separated_kg_s = m_liquid_separated_kg_h / 3600;
+        const liquid_flow_m3_s = m_liquid_separated_kg_s / rho_l;
+        const residence_time = liquid_volume_m3 / Math.max(liquid_flow_m3_s, 1e-6);
+
         // 9. 更新结果显示
         document.getElementById('saturationTemp').textContent = formatNumber(T_sat_C, 2);
         document.getElementById('volumeFlowSteam').textContent = formatNumber(V_total_in, 6);
@@ -2062,6 +2084,7 @@ async function calculateSteam() {
             heightElement.textContent = formatNumber(H_mm, 0);
         }
         document.getElementById('minArea').textContent = formatNumber(A_min, 4);
+        document.getElementById('residenceTimeSteam').textContent = formatNumber(residence_time, 1);
 
         // 10. 更新 SVG 示意图
         updateSteamDiagram(D_mm, H_mm, x_in, m_liquid_separated_kg_h / m_total_kg_h);
@@ -2111,6 +2134,10 @@ async function calculateSteam() {
             heightElement.textContent = '-';
         }
         document.getElementById('minArea').textContent = '-';
+        const residenceTimeSteamElement = document.getElementById('residenceTimeSteam');
+        if (residenceTimeSteamElement) {
+            residenceTimeSteamElement.textContent = '-';
+        }
     } finally {
         // 恢复计算按钮
         const calcBtn = document.getElementById('calculateBtnSteam');
