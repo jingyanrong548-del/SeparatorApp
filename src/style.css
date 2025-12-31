@@ -108,6 +108,10 @@ header h1 {
 /* 分离器内容区域 */
 .separator-content {
     width: 100%;
+    min-height: 100px; /* 确保在移动端有最小高度 */
+    display: block; /* 确保显示 */
+    position: relative; /* 确保定位正常 */
+    overflow: visible; /* 确保内容不被裁剪 */
 }
 
 /* SVG示意图容器 */
@@ -202,11 +206,14 @@ header h1 {
     grid-template-columns: 1fr 1fr;
     gap: 30px;
     margin-bottom: 30px;
+    width: 100%; /* 确保宽度100% */
+    min-height: 200px; /* 确保有最小高度 */
 }
 
 @media (max-width: 968px) {
     .main-content {
         grid-template-columns: 1fr;
+        gap: 20px; /* 移动端减小间距 */
     }
 }
 
@@ -230,6 +237,32 @@ header h1 {
 
 .form-group {
     margin-bottom: 25px;
+}
+
+/* 计算模式组样式 - 突出显示重要设置 */
+.calc-mode-group {
+    padding: 20px;
+    background: var(--light-gray);
+    border-radius: 8px;
+    border: 2px solid var(--accent-blue);
+    margin-bottom: 30px;
+}
+
+.calc-mode-group label {
+    color: var(--primary-blue);
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.calc-mode-group .input-field {
+    border-color: var(--accent-blue);
+    background: var(--white);
+    font-weight: 600;
+}
+
+.calc-mode-group .input-field:focus {
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.15);
 }
 
 .form-group label {
@@ -323,6 +356,19 @@ header h1 {
     background: #ffebee;
     color: #c62828;
     border-left: 4px solid #c62828;
+    /* 错误消息不自动隐藏，持续显示 */
+    display: block !important;
+    font-weight: 600;
+    animation: pulse-warning 2s ease-in-out infinite;
+}
+
+@keyframes pulse-warning {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(198, 40, 40, 0);
+    }
 }
 
 .status-message.success {
@@ -431,6 +477,204 @@ header h1 {
         height: auto !important;
         min-height: 400px;
         aspect-ratio: 400 / 500;
+    }
+    
+    /* 确保水蒸汽立式内容在移动端正确显示 */
+    #steamContent.separator-content {
+        display: block !important; /* 当激活时强制显示 */
+        width: 100% !important;
+        min-height: 500px; /* 确保有足够的高度 */
+        visibility: visible !important; /* 确保可见 */
+        opacity: 1 !important; /* 确保不透明 */
+    }
+    
+    #steamContent .main-content {
+        display: flex !important; /* 移动端使用flex布局更可靠 */
+        flex-direction: column;
+        gap: 20px;
+        width: 100%;
+    }
+    
+    #steamContent .input-section,
+    #steamContent .result-section {
+        width: 100%;
+        flex: 1;
+        min-width: 0; /* 防止flex项目溢出 */
+    }
+    
+    /* 确保水蒸汽模块的所有子元素都可见 */
+    #steamContent * {
+        max-width: 100%;
+    }
+}
+
+/* 结论与建议区域样式 */
+.conclusion-section {
+    margin-top: 30px;
+    padding: 25px;
+    background: var(--white);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border-top: 3px solid var(--accent-blue);
+}
+
+.conclusion-section h3 {
+    color: var(--primary-blue);
+    font-size: 1.3rem;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--medium-gray);
+}
+
+.conclusion-overall {
+    padding: 15px 20px;
+    border-radius: 6px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.conclusion-qualified {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-left: 4px solid #2e7d32;
+}
+
+.conclusion-warning {
+    background: #fff3e0;
+    color: #e65100;
+    border-left: 4px solid #ff9800;
+}
+
+.conclusion-unqualified {
+    background: #ffebee;
+    color: #c62828;
+    border-left: 4px solid #c62828;
+    animation: pulse-warning 2s ease-in-out infinite;
+    font-weight: 600;
+}
+
+.conclusion-items {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.conclusion-item {
+    padding: 15px;
+    border-radius: 6px;
+    border-left: 4px solid;
+    transition: all 0.3s ease;
+}
+
+.conclusion-item:hover {
+    transform: translateX(5px);
+    box-shadow: var(--shadow);
+}
+
+.conclusion-item-qualified {
+    background: #f1f8e9;
+    border-left-color: #689f38;
+}
+
+.conclusion-item-warning {
+    background: #fff8e1;
+    border-left-color: #fbc02d;
+}
+
+.conclusion-item-unqualified {
+    background: #ffebee;
+    border-left-color: #d32f2f;
+    border-left-width: 5px;
+    font-weight: 600;
+}
+
+.conclusion-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.conclusion-item-name {
+    color: var(--text-dark);
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.conclusion-item-value {
+    color: var(--primary-blue);
+    font-weight: 700;
+    font-size: 1.1rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.conclusion-item-desc {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.conclusion-item-desc strong {
+    color: var(--primary-blue);
+    font-weight: 600;
+}
+
+.conclusion-suggestions {
+    margin-top: 20px;
+    padding: 20px;
+    background: var(--light-gray);
+    border-radius: 6px;
+    border-left: 4px solid var(--accent-blue);
+}
+
+.conclusion-suggestions h4 {
+    color: var(--primary-blue);
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.conclusion-suggestions ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.conclusion-suggestions li {
+    padding: 10px 0;
+    padding-left: 25px;
+    position: relative;
+    color: var(--text-dark);
+    line-height: 1.6;
+}
+
+.conclusion-suggestions li:before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--accent-blue);
+    font-weight: bold;
+}
+
+.conclusion-suggestions li:not(:last-child) {
+    border-bottom: 1px solid var(--border-color);
+}
+
+@media (max-width: 768px) {
+    .conclusion-section {
+        padding: 20px;
+    }
+    
+    .conclusion-item-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .conclusion-item-value {
+        font-size: 1rem;
     }
 }
 

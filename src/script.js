@@ -168,6 +168,8 @@ async function calculateHorizontal() {
         if (isNaN(deltaT_sh) || deltaT_sh < 0) {
             throw new Error('吸气过热度必须大于等于 0');
         }
+        // 如果过热度为 0，使用 0.001 进行计算
+        const deltaT_sh_calc = deltaT_sh === 0 ? 0.001 : deltaT_sh;
         if (calcModeH === 'manual-diameter') {
             const D_mm_input = parseFloat(document.getElementById('diameterInputH').value);
             if (isNaN(D_mm_input) || D_mm_input <= 0) {
@@ -196,7 +198,7 @@ async function calculateHorizontal() {
 
         // 温度单位转换：°C 转 K
         const Te_K = Te_C + 273.15;
-        const T_suc_K = Te_K + deltaT_sh;
+        const T_suc_K = Te_K + deltaT_sh_calc;
 
         // 1. 计算蒸发压力 (饱和压力，Q=1 表示饱和蒸汽)
         const P_sat = CoolPropModule.PropsSI('P', 'T', Te_K, 'Q', 1, refrigerant);
@@ -620,6 +622,7 @@ async function calculateHorizontal() {
 
         // 更新结果显示
         document.getElementById('massFlowH').textContent = formatNumber(m_dot, 3);
+        document.getElementById('volumeFlowH').textContent = formatNumber(V_g, 6);
         document.getElementById('gasDensityH').textContent = formatNumber(rho_g, 2);
         document.getElementById('liquidDensityH').textContent = formatNumber(rho_l, 2);
         document.getElementById('terminalVelocityH').textContent = formatNumber(vt, 3);
@@ -667,70 +670,61 @@ async function calculateHorizontal() {
         // 更新SVG示意图（使用用户要求的 updateSvg 函数）
         updateSvg(L_mm, D_mm, h_liq_ratio, cannotSettle);
 
-        // 状态消息
+        // 评估设计并显示结论
+        // 在校核模式下，获取用户输入的目标防夹带速度比值
+        let targetVelocityRatio = null;
         if (calcModeH === 'manual-diameter') {
-            // 手动输入直径模式：显示校核结果
-            const actual_vh_vt_ratio = vh_display / vt;
-            if (!isSafeVelocity) {
-                showStatus(
-                    `❌ 校核结果: 实际水平气速 ${vh_display.toFixed(3)} m/s 超过防夹带速度 ${v_max_entrainment.toFixed(3)} m/s！` +
-                    `实际 vh/vt 比值: ${actual_vh_vt_ratio.toFixed(2)}，建议增大直径或降低流量`,
-                    'error',
-                    'statusH'
-                );
-            } else if (velocityRatio_re > 0.8) {
-                showStatus(
-                    `⚠️ 校核结果: 实际水平气速 ${vh_display.toFixed(3)} m/s 接近防夹带速度 ${v_max_entrainment.toFixed(3)} m/s。` +
-                    `实际 vh/vt 比值: ${actual_vh_vt_ratio.toFixed(2)}，建议增大直径`,
-                    'info',
-                    'statusH'
-                );
-            } else {
-                showStatus(
-                    `✓ 校核完成！实际水平气速: ${vh_display.toFixed(3)} m/s，实际 vh/vt 比值: ${actual_vh_vt_ratio.toFixed(2)}，防夹带速度: ${v_max_entrainment.toFixed(3)} m/s (安全比值: ${velocityRatio_re.toFixed(2)})`,
-                    'success',
-                    'statusH'
-                );
+            const targetInput = document.getElementById('targetVelocityRatioH');
+            if (targetInput) {
+                const targetValue = parseFloat(targetInput.value);
+                if (!isNaN(targetValue) && targetValue > 0 && targetValue < 1.0) {
+                    targetVelocityRatio = targetValue;
+                }
             }
-        } else if (structureAdjusted) {
-            // 结构参数已自动调整
-            const original_vh = vh_vt_ratio * vt;
-            showStatus(
-                `⚠️ 已自动调整结构参数！原设计气速 ${original_vh.toFixed(3)} m/s 超过防夹带速度 ${v_max_entrainment.toFixed(3)} m/s。` +
-                `调整后：D=${D_mm.toFixed(0)}mm, L=${L_mm.toFixed(0)}mm, vh=${vh_display.toFixed(3)}m/s (安全比值: ${velocityRatio_re.toFixed(2)})`,
-                'info',
-                'statusH'
-            );
-        } else if (!isSafeVelocity) {
-            // 即使调整后仍不安全，给出严重警告和建议
-            const suggested_vh_ratio = (v_max_entrainment / vt) * 0.9; // 建议的水平气速倍数（90%的安全余量）
-            showStatus(
-                `❌ 严重警告: 水平气速 ${vh_display.toFixed(3)} m/s 超过防夹带速度 ${v_max_entrainment.toFixed(3)} m/s (比值: ${velocityRatio_re.toFixed(2)})！` +
-                `建议：1) 降低水平气速倍数至 ${suggested_vh_ratio.toFixed(1)} 以下；` +
-                `2) 或增大长径比 L/D；3) 或降低液位高度比`,
-                'error',
-                'statusH'
-            );
-        } else if (velocityRatio_re > 0.8) {
-            showStatus(
-                `注意: 水平气速 ${vh_display.toFixed(3)} m/s 接近防夹带速度 ${v_max_entrainment.toFixed(3)} m/s (比值: ${velocityRatio_re.toFixed(2)})，建议降低气速或增大直径`,
-                'info',
-                'statusH'
-            );
+        }
+        const evaluationH = evaluateHorizontalDesign(vh_display, vt, v_max_entrainment, D_mm, L_mm, L_D_ratio, h_liq_ratio, Vol_L, m_dot, rho_g, cannotSettle, calcModeH, targetVelocityRatio);
+        const conclusionHTMLH = generateConclusionHTML(evaluationH);
+        
+        const conclusionSectionH = document.getElementById('conclusionSectionH');
+        const conclusionContentH = document.getElementById('conclusionContentH');
+        if (conclusionSectionH && conclusionContentH) {
+            conclusionContentH.innerHTML = conclusionHTMLH;
+            conclusionSectionH.style.display = 'block';
+        }
+
+        // 根据评估结果显示状态消息（不合理的设计不会自动隐藏）
+        if (calcModeH === 'manual-diameter') {
+            const actual_vh_vt_ratio = vh_display / vt;
+            if (evaluationH.overallStatus === 'unqualified') {
+                showStatus(`❌ 校核结果：设计不合格！请查看下方结论与建议进行调整。`, 'error', 'statusH');
+            } else if (evaluationH.overallStatus === 'warning') {
+                showStatus(`⚠️ 校核结果：设计需注意！请查看下方结论与建议。`, 'error', 'statusH');
+            } else {
+                showStatus(`✓ 校核完成！设计合格。`, 'success', 'statusH');
+            }
         } else {
-            showStatus(
-                `计算完成！防夹带速度: ${v_max_entrainment.toFixed(3)} m/s，当前气速安全 (比值: ${velocityRatio_re.toFixed(2)})`,
-                'success',
-                'statusH'
-            );
+            if (evaluationH.overallStatus === 'unqualified') {
+                showStatus('❌ 计算完成，但设计不合格！请查看下方结论与建议进行调整。', 'error', 'statusH');
+            } else if (evaluationH.overallStatus === 'warning') {
+                showStatus('⚠️ 计算完成，但设计需注意！请查看下方结论与建议。', 'error', 'statusH');
+            } else {
+                showStatus('✓ 计算完成！设计合格。', 'success', 'statusH');
+            }
         }
 
     } catch (error) {
         console.error('计算错误:', error);
         showStatus('错误: ' + error.message, 'error', 'statusH');
         
+        // 隐藏结论部分
+        const conclusionSectionH = document.getElementById('conclusionSectionH');
+        if (conclusionSectionH) {
+            conclusionSectionH.style.display = 'none';
+        }
+        
         // 清空结果显示
         document.getElementById('massFlowH').textContent = '-';
+        document.getElementById('volumeFlowH').textContent = '-';
         document.getElementById('gasDensityH').textContent = '-';
         document.getElementById('liquidDensityH').textContent = '-';
         document.getElementById('terminalVelocityH').textContent = '-';
@@ -955,6 +949,656 @@ function updateSvg(length, diameter, liquidLevel, cannotSettle = false) {
     drawHorizontalSeparator(diameter, length, liquidLevel, cannotSettle);
 }
 
+// 评估立式分离器设计
+// 参数：u (设计气速), vt (终端速度), D_mm (直径mm), H_mm (高度mm), Vol_L (容积L), 
+//      m_dot (质量流量kg/s), rho_g (气体密度kg/m³), calcMode (计算模式), velocityRatio (气速系数，仅自动模式)
+function evaluateVerticalDesign(u, vt, D_mm, H_mm, Vol_L, m_dot, rho_g, calcMode, velocityRatio = null) {
+    const evaluation = {
+        overallStatus: 'qualified', // 'qualified', 'warning', 'unqualified'
+        items: [],
+        suggestions: []
+    };
+
+    // 1. 气速比值评估
+    const velocityRatio_actual = u / vt;
+    let velocityStatus = 'qualified';
+    let velocityStatusText = '';
+    
+    if (velocityRatio_actual > 1.0) {
+        velocityStatus = 'unqualified';
+        velocityStatusText = '危险：气速超过终端速度，无法有效分离液滴';
+    } else if (velocityRatio_actual > 0.95) {
+        velocityStatus = 'unqualified';
+        velocityStatusText = '危险：气速接近终端速度，分离效果差';
+    } else if (velocityRatio_actual > 0.90) {
+        velocityStatus = 'warning';
+        velocityStatusText = '警告：气速接近上限，建议降低';
+    } else if (velocityRatio_actual >= 0.85) {
+        velocityStatus = 'qualified';
+        velocityStatusText = '良好：气速在推荐范围内';
+    } else if (velocityRatio_actual >= 0.75) {
+        velocityStatus = 'qualified';
+        velocityStatusText = '优秀：气速在最佳范围内';
+    } else {
+        velocityStatus = 'warning';
+        velocityStatusText = '注意：气速较低，设计较保守，可考虑优化';
+    }
+    
+    evaluation.items.push({
+        name: '气速比值 (u/vt)',
+        value: velocityRatio_actual.toFixed(3),
+        status: velocityStatus,
+        description: velocityStatusText
+    });
+    
+    if (velocityStatus === 'unqualified') {
+        evaluation.overallStatus = 'unqualified';
+    } else if (velocityStatus === 'warning' && evaluation.overallStatus === 'qualified') {
+        evaluation.overallStatus = 'warning';
+    }
+
+    // 2. 直径标准化检查
+    const standardDiameters = [100, 150, 200, 250, 300, 400, 500, 600, 800, 1000];
+    let closestStandard = null;
+    let minDiff = Infinity;
+    
+    for (const stdD of standardDiameters) {
+        const diff = Math.abs(D_mm - stdD);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestStandard = stdD;
+        }
+    }
+    
+    const diameterDeviation = (minDiff / closestStandard) * 100;
+    let diameterStatus = 'qualified';
+    let diameterStatusText = '';
+    
+    if (diameterDeviation <= 5) {
+        diameterStatus = 'qualified';
+        diameterStatusText = `标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else if (diameterDeviation <= 10) {
+        diameterStatus = 'warning';
+        diameterStatusText = `接近标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else {
+        diameterStatus = 'warning';
+        diameterStatusText = `非标准直径，建议使用：${closestStandard} mm`;
+    }
+    
+    evaluation.items.push({
+        name: '直径标准化',
+        value: `${D_mm.toFixed(0)} mm`,
+        status: diameterStatus,
+        description: diameterStatusText,
+        suggestedValue: diameterDeviation > 5 ? `${closestStandard} mm` : null
+    });
+    
+    if (diameterStatus === 'warning' && evaluation.overallStatus === 'qualified') {
+        evaluation.overallStatus = 'warning';
+    }
+
+    // 3. 高度范围验证
+    const H_D_ratio = H_mm / D_mm;
+    let heightStatus = 'qualified';
+    let heightStatusText = '';
+    
+    if (H_D_ratio >= 2.5 && H_D_ratio <= 3.0) {
+        heightStatus = 'qualified';
+        heightStatusText = '推荐：高度在最佳范围内';
+    } else if (H_D_ratio >= 2.0 && H_D_ratio < 2.5) {
+        heightStatus = 'warning';
+        heightStatusText = '可接受：高度略低，建议 H/D = 2.5-3.0';
+    } else if (H_D_ratio > 3.0 && H_D_ratio <= 3.5) {
+        heightStatus = 'warning';
+        heightStatusText = '可接受：高度略高，建议 H/D = 2.5-3.0';
+    } else if (H_D_ratio < 2.0) {
+        heightStatus = 'warning';
+        heightStatusText = '不推荐：高度过低，建议 H/D ≥ 2.5';
+    } else {
+        heightStatus = 'warning';
+        heightStatusText = '不推荐：高度过高，建议 H/D ≤ 3.5';
+    }
+    
+    const suggestedHeight = D_mm * 2.75; // 推荐使用 2.75 倍直径
+    
+    evaluation.items.push({
+        name: '高度范围 (H/D)',
+        value: H_D_ratio.toFixed(2),
+        status: heightStatus,
+        description: heightStatusText,
+        suggestedValue: (H_D_ratio < 2.5 || H_D_ratio > 3.0) ? `${suggestedHeight.toFixed(0)} mm` : null
+    });
+    
+    if (heightStatus === 'warning' && evaluation.overallStatus === 'qualified') {
+        evaluation.overallStatus = 'warning';
+    }
+
+    // 4. 容积合理性评估
+    // 基于质量流量估算最小停留时间（假设需要至少 5 秒停留时间）
+    const minResidenceTime = 5; // 秒
+    const minVolume_L = m_dot * minResidenceTime * 0.1; // 粗略估算，假设液体占10%
+    
+    let volumeStatus = 'qualified';
+    let volumeStatusText = '';
+    
+    if (Vol_L >= minVolume_L * 2) {
+        volumeStatus = 'qualified';
+        volumeStatusText = '充足：容积满足停留时间要求';
+    } else if (Vol_L >= minVolume_L) {
+        volumeStatus = 'qualified';
+        volumeStatusText = '合理：容积基本满足要求';
+    } else {
+        volumeStatus = 'warning';
+        volumeStatusText = `注意：容积可能偏小，建议至少 ${(minVolume_L * 1.5).toFixed(1)} L`;
+    }
+    
+    evaluation.items.push({
+        name: '容积合理性',
+        value: `${Vol_L.toFixed(1)} L`,
+        status: volumeStatus,
+        description: volumeStatusText
+    });
+
+    // 5. 生成具体建议
+    if (velocityRatio_actual > 0.90) {
+        if (calcMode === 'auto') {
+            evaluation.suggestions.push(`降低设计气速系数至 ${(0.85 * vt / vt).toFixed(2)} 以下（当前：${velocityRatio?.toFixed(2) || velocityRatio_actual.toFixed(2)}）`);
+        } else if (calcMode === 'manual-velocity') {
+            evaluation.suggestions.push(`降低设计气速至 ${(0.85 * vt).toFixed(3)} m/s 以下（当前：${u.toFixed(3)} m/s）`);
+        } else {
+            const V_g = m_dot / rho_g;
+            evaluation.suggestions.push(`增大直径至 ${(Math.sqrt((4 * V_g) / (Math.PI * 0.85 * vt)) * 1000).toFixed(0)} mm 以上（当前：${D_mm.toFixed(0)} mm）`);
+        }
+    }
+    
+    if (diameterDeviation > 5) {
+        evaluation.suggestions.push(`使用标准直径 ${closestStandard} mm（当前：${D_mm.toFixed(0)} mm）`);
+    }
+    
+    if (H_D_ratio < 2.5 || H_D_ratio > 3.0) {
+        evaluation.suggestions.push(`调整高度至 ${suggestedHeight.toFixed(0)} mm（当前：${H_mm.toFixed(0)} mm，H/D = ${H_D_ratio.toFixed(2)}）`);
+    }
+    
+    if (Vol_L < minVolume_L) {
+        const suggestedD = Math.sqrt((minVolume_L * 1.5 * 1000) / (Math.PI * (H_mm / 1000) * 0.25));
+        evaluation.suggestions.push(`增大直径或高度以增加容积（建议容积：${(minVolume_L * 1.5).toFixed(1)} L）`);
+    }
+
+    return evaluation;
+}
+
+// 生成结论HTML内容
+function generateConclusionHTML(evaluation) {
+    let html = '';
+    
+    // 总体状态
+    const statusClass = evaluation.overallStatus === 'qualified' ? 'conclusion-qualified' : 
+                       evaluation.overallStatus === 'warning' ? 'conclusion-warning' : 
+                       'conclusion-unqualified';
+    const statusText = evaluation.overallStatus === 'qualified' ? '✓ 设计合格' : 
+                      evaluation.overallStatus === 'warning' ? '⚠ 设计需注意' : 
+                      '❌ 设计不合格';
+    
+    html += `<div class="conclusion-overall ${statusClass}">${statusText}</div>`;
+    
+    // 评估项目
+    html += '<div class="conclusion-items">';
+    evaluation.items.forEach(item => {
+        const itemStatusClass = item.status === 'qualified' ? 'conclusion-item-qualified' : 
+                               item.status === 'warning' ? 'conclusion-item-warning' : 
+                               'conclusion-item-unqualified';
+        html += `<div class="conclusion-item ${itemStatusClass}">`;
+        html += `<div class="conclusion-item-header">`;
+        html += `<span class="conclusion-item-name">${item.name}</span>`;
+        html += `<span class="conclusion-item-value">${item.value}</span>`;
+        html += `</div>`;
+        html += `<div class="conclusion-item-desc">${item.description}`;
+        if (item.suggestedValue) {
+            html += ` <strong>建议值：${item.suggestedValue}</strong>`;
+        }
+        html += `</div>`;
+        html += `</div>`;
+    });
+    html += '</div>';
+    
+    // 具体建议
+    if (evaluation.suggestions.length > 0) {
+        html += '<div class="conclusion-suggestions">';
+        html += '<h4>调整建议：</h4>';
+        html += '<ul>';
+        evaluation.suggestions.forEach(suggestion => {
+            html += `<li>${suggestion}</li>`;
+        });
+        html += '</ul>';
+        html += '</div>';
+    }
+    
+    return html;
+}
+
+// 评估卧式分离器设计
+// 参数：vh (水平气速), vt (沉降速度), v_max_entrainment (防夹带速度), D_mm (直径mm), L_mm (长度mm), 
+//      L_D_ratio (长径比), h_liq_ratio (液位高度比), Vol_L (容积L), m_dot (质量流量kg/s), 
+//      rho_g (气体密度), cannotSettle (是否无法沉降), calcMode (计算模式), targetVelocityRatio (目标防夹带速度比值，可选)
+function evaluateHorizontalDesign(vh, vt, v_max_entrainment, D_mm, L_mm, L_D_ratio, h_liq_ratio, Vol_L, m_dot, rho_g, cannotSettle, calcMode, targetVelocityRatio = null) {
+    const evaluation = {
+        overallStatus: 'qualified',
+        items: [],
+        suggestions: []
+    };
+
+    // 1. 防夹带速度评估（最重要）
+    const velocityRatio_re = vh / v_max_entrainment;
+    let entrainmentStatus = 'qualified';
+    let entrainmentStatusText = '';
+    
+    // 如果提供了目标值，使用目标值进行评估
+    const targetRatio = targetVelocityRatio !== null ? targetVelocityRatio : 0.8;
+    const deviationFromTarget = velocityRatio_re - targetRatio;
+    
+    if (velocityRatio_re >= 1.0) {
+        entrainmentStatus = 'unqualified';
+        entrainmentStatusText = '危险：水平气速超过防夹带速度，会发生液滴夹带';
+    } else if (velocityRatio_re >= 0.9) {
+        entrainmentStatus = 'unqualified';
+        entrainmentStatusText = '危险：水平气速接近防夹带速度，存在夹带风险';
+    } else if (velocityRatio_re >= 0.8) {
+        entrainmentStatus = 'warning';
+        if (targetVelocityRatio !== null && velocityRatio_re > targetRatio) {
+            entrainmentStatusText = `警告：水平气速超过目标值 ${targetRatio.toFixed(2)}，当前 ${velocityRatio_re.toFixed(3)}，建议降低`;
+        } else {
+            entrainmentStatusText = '警告：水平气速接近防夹带速度，建议降低';
+        }
+    } else if (velocityRatio_re >= 0.6) {
+        entrainmentStatus = 'qualified';
+        if (targetVelocityRatio !== null) {
+            if (velocityRatio_re <= targetRatio) {
+                entrainmentStatusText = `良好：水平气速满足目标值 ${targetRatio.toFixed(2)}（当前：${velocityRatio_re.toFixed(3)}）`;
+            } else {
+                entrainmentStatusText = `注意：水平气速略高于目标值 ${targetRatio.toFixed(2)}（当前：${velocityRatio_re.toFixed(3)}）`;
+                entrainmentStatus = 'warning';
+            }
+        } else {
+            entrainmentStatusText = '良好：水平气速在安全范围内';
+        }
+    } else {
+        entrainmentStatus = 'qualified';
+        if (targetVelocityRatio !== null && velocityRatio_re <= targetRatio) {
+            entrainmentStatusText = `优秀：水平气速满足目标值 ${targetRatio.toFixed(2)}，有充足安全余量（当前：${velocityRatio_re.toFixed(3)}）`;
+        } else {
+            entrainmentStatusText = '优秀：水平气速安全，有充足余量';
+        }
+    }
+    
+    evaluation.items.push({
+        name: '防夹带速度比值 (vh/Vre)',
+        value: velocityRatio_re.toFixed(3),
+        status: entrainmentStatus,
+        description: entrainmentStatusText
+    });
+    
+    if (entrainmentStatus === 'unqualified') {
+        evaluation.overallStatus = 'unqualified';
+    } else if (entrainmentStatus === 'warning' && evaluation.overallStatus === 'qualified') {
+        evaluation.overallStatus = 'warning';
+    }
+
+    // 2. 水平气速倍数评估 (vh/vt)
+    const vh_vt_ratio = vh / vt;
+    let vhVtStatus = 'qualified';
+    let vhVtStatusText = '';
+    
+    if (vh_vt_ratio > 5.0) {
+        vhVtStatus = 'warning';
+        vhVtStatusText = '注意：水平气速倍数较高，建议控制在 1.0-5.0 之间';
+    } else if (vh_vt_ratio >= 1.0 && vh_vt_ratio <= 5.0) {
+        vhVtStatus = 'qualified';
+        vhVtStatusText = '合理：水平气速倍数在推荐范围内';
+    } else {
+        vhVtStatus = 'warning';
+        vhVtStatusText = '注意：水平气速倍数较低，设计较保守';
+    }
+    
+    evaluation.items.push({
+        name: '水平气速倍数 (vh/vt)',
+        value: vh_vt_ratio.toFixed(2),
+        status: vhVtStatus,
+        description: vhVtStatusText
+    });
+
+    // 3. 液滴沉降能力评估
+    let settleStatus = 'qualified';
+    let settleStatusText = '';
+    
+    if (cannotSettle) {
+        settleStatus = 'unqualified';
+        settleStatusText = '不合格：液滴无法在有效长度内沉降到液面';
+    } else {
+        settleStatus = 'qualified';
+        settleStatusText = '合格：液滴可以在有效长度内沉降到液面';
+    }
+    
+    evaluation.items.push({
+        name: '液滴沉降能力',
+        value: cannotSettle ? '无法沉降' : '可以沉降',
+        status: settleStatus,
+        description: settleStatusText
+    });
+    
+    if (settleStatus === 'unqualified') {
+        evaluation.overallStatus = 'unqualified';
+    }
+
+    // 4. 直径标准化检查
+    const standardDiameters = [100, 150, 200, 250, 300, 400, 500, 600, 800, 1000];
+    let closestStandard = null;
+    let minDiff = Infinity;
+    
+    for (const stdD of standardDiameters) {
+        const diff = Math.abs(D_mm - stdD);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestStandard = stdD;
+        }
+    }
+    
+    const diameterDeviation = (minDiff / closestStandard) * 100;
+    let diameterStatus = 'qualified';
+    let diameterStatusText = '';
+    
+    if (diameterDeviation <= 5) {
+        diameterStatus = 'qualified';
+        diameterStatusText = `标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else if (diameterDeviation <= 10) {
+        diameterStatus = 'warning';
+        diameterStatusText = `接近标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else {
+        diameterStatus = 'warning';
+        diameterStatusText = `非标准直径，建议使用：${closestStandard} mm`;
+    }
+    
+    evaluation.items.push({
+        name: '直径标准化',
+        value: `${D_mm.toFixed(0)} mm`,
+        status: diameterStatus,
+        description: diameterStatusText,
+        suggestedValue: diameterDeviation > 5 ? `${closestStandard} mm` : null
+    });
+
+    // 5. 长径比评估
+    let ldRatioStatus = 'qualified';
+    let ldRatioStatusText = '';
+    
+    if (L_D_ratio >= 2.0 && L_D_ratio <= 6.0) {
+        if (L_D_ratio >= 2.5 && L_D_ratio <= 4.0) {
+            ldRatioStatus = 'qualified';
+            ldRatioStatusText = '推荐：长径比在最佳范围内';
+        } else {
+            ldRatioStatus = 'qualified';
+            ldRatioStatusText = '可接受：长径比在允许范围内';
+        }
+    } else if (L_D_ratio < 2.0) {
+        ldRatioStatus = 'warning';
+        ldRatioStatusText = '不推荐：长径比过小，建议 L/D ≥ 2.0';
+    } else {
+        ldRatioStatus = 'warning';
+        ldRatioStatusText = '不推荐：长径比过大，建议 L/D ≤ 6.0';
+    }
+    
+    evaluation.items.push({
+        name: '长径比 (L/D)',
+        value: L_D_ratio.toFixed(2),
+        status: ldRatioStatus,
+        description: ldRatioStatusText
+    });
+
+    // 6. 液位高度比评估
+    let liquidLevelStatus = 'qualified';
+    let liquidLevelStatusText = '';
+    
+    if (h_liq_ratio >= 0.1 && h_liq_ratio <= 0.5) {
+        if (h_liq_ratio >= 0.2 && h_liq_ratio <= 0.4) {
+            liquidLevelStatus = 'qualified';
+            liquidLevelStatusText = '推荐：液位高度比在最佳范围内';
+        } else {
+            liquidLevelStatus = 'qualified';
+            liquidLevelStatusText = '可接受：液位高度比在允许范围内';
+        }
+    } else {
+        liquidLevelStatus = 'warning';
+        liquidLevelStatusText = '不推荐：液位高度比超出推荐范围 (0.1-0.5)';
+    }
+    
+    evaluation.items.push({
+        name: '液位高度比 (H_liq/D)',
+        value: h_liq_ratio.toFixed(2),
+        status: liquidLevelStatus,
+        description: liquidLevelStatusText
+    });
+
+    // 生成具体建议
+    if (velocityRatio_re >= 0.8 || (targetVelocityRatio !== null && velocityRatio_re > targetVelocityRatio)) {
+        const targetRatio = targetVelocityRatio !== null ? targetVelocityRatio : 0.75;
+        const suggested_vh = v_max_entrainment * targetRatio; // 使用目标比值或75%的安全余量
+        
+        if (calcMode === 'auto') {
+            // 自动模式：告诉用户调整水平气速倍数输入框
+            const current_vh_vt_ratio = vh / vt;
+            const suggested_vh_vt_ratio = suggested_vh / vt;
+            evaluation.suggestions.push(`【调整方法】在左侧输入参数区域，找到"水平气速倍数 (vh/vt)"输入框，将其值调整为 ${suggested_vh_vt_ratio.toFixed(2)} 以下（当前值：${current_vh_vt_ratio.toFixed(2)}），然后重新计算`);
+            evaluation.suggestions.push(`调整后目标水平气速：${suggested_vh.toFixed(3)} m/s（当前：${vh.toFixed(3)} m/s）`);
+            evaluation.suggestions.push(`【替代方案】或增大长径比 L/D 以增加分离长度，或降低液位高度比 H_liq/D 以增加气相流通面积`);
+        } else {
+            // 手动直径模式（校核模式）：建议增大直径
+            if (targetVelocityRatio !== null) {
+                evaluation.suggestions.push(`当前防夹带速度比值 ${velocityRatio_re.toFixed(3)} 超过目标值 ${targetVelocityRatio.toFixed(2)}，建议增大直径以降低实际气速`);
+                // 计算气相流通面积比例（使用与计算函数相同的逻辑）
+                // 简化估算：使用当前液位高度比计算气相面积比例
+                const d_over_R = 1 - 2 * h_liq_ratio;
+                const theta_half = Math.acos(Math.max(-1, Math.min(1, d_over_R)));
+                const theta = 2 * theta_half;
+                const liquidAreaRatio = (theta - Math.sin(theta)) / (2 * Math.PI);
+                const gasAreaRatio = Math.max(0, Math.min(1, 1 - liquidAreaRatio));
+                
+                const V_g = m_dot / rho_g;
+                const suggested_vh_target = v_max_entrainment * targetVelocityRatio;
+                const suggested_D = Math.sqrt((4 * V_g) / (Math.PI * suggested_vh_target * gasAreaRatio)) * 1000;
+                evaluation.suggestions.push(`建议直径：${suggested_D.toFixed(0)} mm 以上（当前：${D_mm.toFixed(0)} mm），以达到目标比值 ${targetVelocityRatio.toFixed(2)}`);
+            } else {
+                evaluation.suggestions.push(`降低水平气速至 ${suggested_vh.toFixed(3)} m/s 以下（当前：${vh.toFixed(3)} m/s）`);
+                evaluation.suggestions.push(`增大直径以降低实际气速`);
+            }
+        }
+    }
+    
+    if (cannotSettle) {
+        if (calcMode === 'auto') {
+            const current_vh_vt_ratio = vh / vt;
+            const suggested_vh_vt_ratio_for_settle = (vt * 0.8) / vt; // 降低气速以增加沉降时间
+            evaluation.suggestions.push(`降低"水平气速倍数 (vh/vt)"至 ${suggested_vh_vt_ratio_for_settle.toFixed(2)} 以下（当前：${current_vh_vt_ratio.toFixed(2)}），或增大长径比 L/D，确保液滴能在有效长度内沉降`);
+        } else {
+            evaluation.suggestions.push(`增大长度或降低水平气速，确保液滴能在有效长度内沉降`);
+        }
+    }
+    
+    if (diameterDeviation > 5) {
+        evaluation.suggestions.push(`使用标准直径 ${closestStandard} mm（当前：${D_mm.toFixed(0)} mm）`);
+    }
+    
+    if (L_D_ratio < 2.0 || L_D_ratio > 6.0) {
+        const suggestedL = D_mm * 3.0;
+        evaluation.suggestions.push(`调整长度至 ${suggestedL.toFixed(0)} mm（当前：${L_mm.toFixed(0)} mm，L/D = ${L_D_ratio.toFixed(2)}）`);
+    }
+
+    return evaluation;
+}
+
+// 评估水蒸汽立式分离器设计
+// 参数：v_max (最大允许气速), D_mm (直径mm), H_mm (高度mm), H_D_ratio (高度/直径比), 
+//      A_min (最小流通面积m²), efficiency (分离效率%), K (Souders-Brown系数)
+function evaluateSteamDesign(v_max, D_mm, H_mm, H_D_ratio, A_min, efficiency, K) {
+    const evaluation = {
+        overallStatus: 'qualified',
+        items: [],
+        suggestions: []
+    };
+
+    // 1. 分离效率评估
+    let efficiencyStatus = 'qualified';
+    let efficiencyStatusText = '';
+    
+    if (efficiency >= 99.0) {
+        efficiencyStatus = 'qualified';
+        efficiencyStatusText = '优秀：分离效率很高';
+    } else if (efficiency >= 95.0) {
+        efficiencyStatus = 'qualified';
+        efficiencyStatusText = '良好：分离效率满足要求';
+    } else if (efficiency >= 90.0) {
+        efficiencyStatus = 'warning';
+        efficiencyStatusText = '可接受：分离效率较低，建议提高至 95% 以上';
+    } else {
+        efficiencyStatus = 'warning';
+        efficiencyStatusText = '不推荐：分离效率过低';
+    }
+    
+    evaluation.items.push({
+        name: '分离效率',
+        value: `${efficiency.toFixed(2)}%`,
+        status: efficiencyStatus,
+        description: efficiencyStatusText
+    });
+
+    // 2. Souders-Brown 系数评估
+    let kStatus = 'qualified';
+    let kStatusText = '';
+    
+    if (K >= 0.10 && K <= 0.20) {
+        kStatus = 'qualified';
+        kStatusText = '推荐：K值在标准范围内（适用于丝网除沫器）';
+    } else if (K >= 0.05 && K <= 0.30) {
+        kStatus = 'qualified';
+        kStatusText = '可接受：K值在允许范围内';
+    } else {
+        kStatus = 'warning';
+        kStatusText = '注意：K值超出常规范围，请确认适用性';
+    }
+    
+    evaluation.items.push({
+        name: 'Souders-Brown 系数 K',
+        value: K.toFixed(3),
+        status: kStatus,
+        description: kStatusText
+    });
+
+    // 3. 直径标准化检查
+    const standardDiameters = [100, 150, 200, 250, 300, 400, 500, 600, 800, 1000, 1200, 1500];
+    let closestStandard = null;
+    let minDiff = Infinity;
+    
+    for (const stdD of standardDiameters) {
+        const diff = Math.abs(D_mm - stdD);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestStandard = stdD;
+        }
+    }
+    
+    const diameterDeviation = (minDiff / closestStandard) * 100;
+    let diameterStatus = 'qualified';
+    let diameterStatusText = '';
+    
+    if (diameterDeviation <= 5) {
+        diameterStatus = 'qualified';
+        diameterStatusText = `标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else if (diameterDeviation <= 10) {
+        diameterStatus = 'warning';
+        diameterStatusText = `接近标准直径：${closestStandard} mm（偏差 ${diameterDeviation.toFixed(1)}%）`;
+    } else {
+        diameterStatus = 'warning';
+        diameterStatusText = `非标准直径，建议使用：${closestStandard} mm`;
+    }
+    
+    evaluation.items.push({
+        name: '直径标准化',
+        value: `${D_mm.toFixed(0)} mm`,
+        status: diameterStatus,
+        description: diameterStatusText,
+        suggestedValue: diameterDeviation > 5 ? `${closestStandard} mm` : null
+    });
+
+    // 4. 高度范围验证
+    let heightStatus = 'qualified';
+    let heightStatusText = '';
+    
+    if (H_D_ratio >= 2.5 && H_D_ratio <= 3.0) {
+        heightStatus = 'qualified';
+        heightStatusText = '推荐：高度在最佳范围内';
+    } else if (H_D_ratio >= 2.0 && H_D_ratio < 2.5) {
+        heightStatus = 'warning';
+        heightStatusText = '可接受：高度略低，建议 H/D = 2.5-3.0';
+    } else if (H_D_ratio > 3.0 && H_D_ratio <= 3.5) {
+        heightStatus = 'warning';
+        heightStatusText = '可接受：高度略高，建议 H/D = 2.5-3.0';
+    } else if (H_D_ratio < 2.0) {
+        heightStatus = 'warning';
+        heightStatusText = '不推荐：高度过低，建议 H/D ≥ 2.5';
+    } else {
+        heightStatus = 'warning';
+        heightStatusText = '不推荐：高度过高，建议 H/D ≤ 3.5';
+    }
+    
+    const suggestedHeight = D_mm * 2.75;
+    
+    evaluation.items.push({
+        name: '高度范围 (H/D)',
+        value: H_D_ratio.toFixed(2),
+        status: heightStatus,
+        description: heightStatusText,
+        suggestedValue: (H_D_ratio < 2.5 || H_D_ratio > 3.0) ? `${suggestedHeight.toFixed(0)} mm` : null
+    });
+
+    // 5. 最大允许气速合理性
+    let velocityStatus = 'qualified';
+    let velocityStatusText = '';
+    
+    if (v_max > 0.5 && v_max < 5.0) {
+        velocityStatus = 'qualified';
+        velocityStatusText = '合理：最大允许气速在典型范围内';
+    } else if (v_max <= 0.5) {
+        velocityStatus = 'warning';
+        velocityStatusText = '注意：最大允许气速较低，可能需要较大直径';
+    } else {
+        velocityStatus = 'warning';
+        velocityStatusText = '注意：最大允许气速较高，请确认计算正确性';
+    }
+    
+    evaluation.items.push({
+        name: '最大允许气速',
+        value: `${v_max.toFixed(3)} m/s`,
+        status: velocityStatus,
+        description: velocityStatusText
+    });
+
+    // 生成具体建议
+    if (efficiency < 95.0) {
+        evaluation.suggestions.push(`提高分离效率至 95% 以上（当前：${efficiency.toFixed(2)}%）`);
+    }
+    
+    if (diameterDeviation > 5) {
+        evaluation.suggestions.push(`使用标准直径 ${closestStandard} mm（当前：${D_mm.toFixed(0)} mm）`);
+    }
+    
+    if (H_D_ratio < 2.5 || H_D_ratio > 3.0) {
+        evaluation.suggestions.push(`调整高度至 ${suggestedHeight.toFixed(0)} mm（当前：${H_mm.toFixed(0)} mm，H/D = ${H_D_ratio.toFixed(2)}）`);
+    }
+    
+    if (K < 0.10 || K > 0.20) {
+        evaluation.suggestions.push(`建议使用标准 K 值范围 0.10-0.20（当前：${K.toFixed(3)}），适用于丝网除沫器`);
+    }
+
+    return evaluation;
+}
+
 // 主计算函数（立式）
 async function calculate() {
     try {
@@ -984,6 +1628,8 @@ async function calculate() {
         if (isNaN(deltaT_sh) || deltaT_sh < 0) {
             throw new Error('吸气过热度必须大于等于 0');
         }
+        // 如果过热度为 0，使用 0.001 进行计算
+        const deltaT_sh_calc = deltaT_sh === 0 ? 0.001 : deltaT_sh;
         if (calcMode === 'manual-velocity' && (isNaN(u) || u <= 0)) {
             throw new Error('设计气速必须大于 0');
         }
@@ -1009,7 +1655,7 @@ async function calculate() {
 
         // 温度单位转换：°C 转 K
         const Te_K = Te_C + 273.15;
-        const T_suc_K = Te_K + deltaT_sh;
+        const T_suc_K = Te_K + deltaT_sh_calc;
 
         // 1. 计算蒸发压力 (饱和压力，Q=1 表示饱和蒸汽)
         const P_sat = CoolPropModule.PropsSI('P', 'T', Te_K, 'Q', 1, refrigerant);
@@ -1124,32 +1770,66 @@ async function calculate() {
 
         // 更新结果显示
         document.getElementById('massFlow').textContent = formatNumber(m_dot, 3);
+        document.getElementById('volumeFlow').textContent = formatNumber(V_g, 6);
         document.getElementById('gasDensity').textContent = formatNumber(rho_g, 2);
         document.getElementById('diameter').textContent = formatNumber(D_mm, 0);
         document.getElementById('height').textContent = formatNumber(H_mm, 0);
         document.getElementById('volume').textContent = formatNumber(Vol_L, 1);
+        document.getElementById('actualVelocity').textContent = formatNumber(u, 3);
         document.getElementById('terminalVelocity').textContent = formatNumber(vt, 3);
         document.getElementById('liquidDensity').textContent = formatNumber(rho_l, 2);
         document.getElementById('gasViscosity').textContent = formatNumber(eta_g, 6);
 
-        // 如果是手动输入直径模式，显示校核结果
+        // 评估设计并显示结论
+        const currentVelocityRatio = calcMode === 'auto' ? velocityRatio : null;
+        const evaluation = evaluateVerticalDesign(u, vt, D_mm, H_mm, Vol_L, m_dot, rho_g, calcMode, currentVelocityRatio);
+        const conclusionHTML = generateConclusionHTML(evaluation);
+        
+        const conclusionSection = document.getElementById('conclusionSection');
+        const conclusionContent = document.getElementById('conclusionContent');
+        if (conclusionSection && conclusionContent) {
+            conclusionContent.innerHTML = conclusionHTML;
+            conclusionSection.style.display = 'block';
+        }
+
+        // 根据评估结果显示状态消息（不合理的设计不会自动隐藏）
         if (calcMode === 'manual-diameter') {
             const actualRatio = u / vt;
-            showStatus(`校核完成！实际气速: ${u.toFixed(3)} m/s，气速/终端速度比值: ${actualRatio.toFixed(2)} ${actualRatio < 0.9 ? '✓' : '⚠'}`, 'success');
+            if (evaluation.overallStatus === 'unqualified') {
+                showStatus(`❌ 校核结果：设计不合格！实际气速: ${u.toFixed(3)} m/s，气速/终端速度比值: ${actualRatio.toFixed(2)}，请查看下方结论与建议进行调整。`, 'error');
+            } else if (evaluation.overallStatus === 'warning') {
+                showStatus(`⚠️ 校核结果：设计需注意！实际气速: ${u.toFixed(3)} m/s，气速/终端速度比值: ${actualRatio.toFixed(2)}，请查看下方结论与建议。`, 'error');
+            } else {
+                showStatus(`✓ 校核完成！实际气速: ${u.toFixed(3)} m/s，气速/终端速度比值: ${actualRatio.toFixed(2)}，设计合格。`, 'success');
+            }
         } else {
-            showStatus('计算完成！', 'success');
+            if (evaluation.overallStatus === 'unqualified') {
+                showStatus('❌ 计算完成，但设计不合格！请查看下方结论与建议进行调整。', 'error');
+            } else if (evaluation.overallStatus === 'warning') {
+                showStatus('⚠️ 计算完成，但设计需注意！请查看下方结论与建议。', 'error');
+            } else {
+                showStatus('✓ 计算完成！设计合格。', 'success');
+            }
         }
 
     } catch (error) {
         console.error('计算错误:', error);
         showStatus('错误: ' + error.message, 'error');
         
+        // 隐藏结论部分
+        const conclusionSection = document.getElementById('conclusionSection');
+        if (conclusionSection) {
+            conclusionSection.style.display = 'none';
+        }
+        
         // 清空结果显示
         document.getElementById('massFlow').textContent = '-';
+        document.getElementById('volumeFlow').textContent = '-';
         document.getElementById('gasDensity').textContent = '-';
         document.getElementById('diameter').textContent = '-';
         document.getElementById('height').textContent = '-';
         document.getElementById('volume').textContent = '-';
+        document.getElementById('actualVelocity').textContent = '-';
         document.getElementById('terminalVelocity').textContent = '-';
         document.getElementById('liquidDensity').textContent = '-';
         document.getElementById('gasViscosity').textContent = '-';
@@ -1320,6 +2000,14 @@ async function calculateSteam() {
         const m_vapor_in_kg_h = m_total_kg_h * x_in;
         const m_liquid_in_kg_h = m_total_kg_h * (1 - x_in);
 
+        // 4.1 计算进口体积流量 (m³/s)
+        // 总进口体积流量 = 蒸汽体积流量 + 液体体积流量
+        const m_vapor_in_kg_s = m_vapor_in_kg_h / 3600;
+        const m_liquid_in_kg_s = m_liquid_in_kg_h / 3600;
+        const V_vapor_in = m_vapor_in_kg_s / rho_v; // 蒸汽体积流量
+        const V_liquid_in = m_liquid_in_kg_s / rho_l; // 液体体积流量
+        const V_total_in = V_vapor_in + V_liquid_in; // 总进口体积流量
+
         // 5. 分离效率计算
         // 假设分离效率应用于液体分离（即有多少液体被分离出来）
         // 分离后的液体流量 = 入口液体流量 + 部分蒸汽冷凝（根据效率）
@@ -1353,12 +2041,20 @@ async function calculateSteam() {
         const H_D_ratio = 2.75; // 推荐长径比
         const H_mm = D_mm * H_D_ratio;
 
+        // 8.2 计算实际气速（基于出口蒸汽流量和容器直径）
+        // 实际气速 = 出口蒸汽体积流量 / 容器截面积
+        const V_steam_out = m_steam_kg_s / rho_v; // 出口蒸汽体积流量 (m³/s)
+        const A_vessel = Math.PI * Math.pow(D_m / 2, 2); // 容器截面积 (m²)
+        const v_actual = V_steam_out / A_vessel; // 实际气速 (m/s)
+
         // 9. 更新结果显示
         document.getElementById('saturationTemp').textContent = formatNumber(T_sat_C, 2);
+        document.getElementById('volumeFlowSteam').textContent = formatNumber(V_total_in, 6);
         document.getElementById('liquidDensitySteam').textContent = formatNumber(rho_l, 2);
         document.getElementById('vaporDensitySteam').textContent = formatNumber(rho_v, 4);
         document.getElementById('separatedLiquidFlow').textContent = formatNumber(m_liquid_separated_kg_h, 2);
         document.getElementById('drySteamFlow').textContent = formatNumber(m_steam_out_kg_h, 2);
+        document.getElementById('actualVelocitySteam').textContent = formatNumber(v_actual, 3);
         document.getElementById('maxVelocity').textContent = formatNumber(v_max, 3);
         document.getElementById('vesselDiameter').textContent = formatNumber(D_mm, 0);
         const heightElement = document.getElementById('vesselHeight');
@@ -1370,23 +2066,44 @@ async function calculateSteam() {
         // 10. 更新 SVG 示意图
         updateSteamDiagram(D_mm, H_mm, x_in, m_liquid_separated_kg_h / m_total_kg_h);
 
-        // 11. 显示成功消息
-        showStatus(
-            `计算完成！推荐容器直径: ${formatNumber(D_mm, 0)} mm，最大允许气速: ${formatNumber(v_max, 3)} m/s`,
-            'success',
-            'statusSteam'
-        );
+        // 11. 评估设计并显示结论
+        const evaluationSteam = evaluateSteamDesign(v_max, D_mm, H_mm, H_D_ratio, A_min, efficiency, K);
+        const conclusionHTMLSteam = generateConclusionHTML(evaluationSteam);
+        
+        const conclusionSectionSteam = document.getElementById('conclusionSectionSteam');
+        const conclusionContentSteam = document.getElementById('conclusionContentSteam');
+        if (conclusionSectionSteam && conclusionContentSteam) {
+            conclusionContentSteam.innerHTML = conclusionHTMLSteam;
+            conclusionSectionSteam.style.display = 'block';
+        }
+
+        // 12. 根据评估结果显示状态消息（不合理的设计不会自动隐藏）
+        if (evaluationSteam.overallStatus === 'unqualified') {
+            showStatus('❌ 计算完成，但设计不合格！请查看下方结论与建议进行调整。', 'error', 'statusSteam');
+        } else if (evaluationSteam.overallStatus === 'warning') {
+            showStatus('⚠️ 计算完成，但设计需注意！请查看下方结论与建议。', 'error', 'statusSteam');
+        } else {
+            showStatus(`✓ 计算完成！推荐容器直径: ${formatNumber(D_mm, 0)} mm，最大允许气速: ${formatNumber(v_max, 3)} m/s，设计合格。`, 'success', 'statusSteam');
+        }
 
     } catch (error) {
         console.error('计算错误:', error);
         showStatus('错误: ' + error.message, 'error', 'statusSteam');
         
+        // 隐藏结论部分
+        const conclusionSectionSteam = document.getElementById('conclusionSectionSteam');
+        if (conclusionSectionSteam) {
+            conclusionSectionSteam.style.display = 'none';
+        }
+        
         // 清空结果显示
         document.getElementById('saturationTemp').textContent = '-';
+        document.getElementById('volumeFlowSteam').textContent = '-';
         document.getElementById('liquidDensitySteam').textContent = '-';
         document.getElementById('vaporDensitySteam').textContent = '-';
         document.getElementById('separatedLiquidFlow').textContent = '-';
         document.getElementById('drySteamFlow').textContent = '-';
+        document.getElementById('actualVelocitySteam').textContent = '-';
         document.getElementById('maxVelocity').textContent = '-';
         document.getElementById('vesselDiameter').textContent = '-';
         const heightElement = document.getElementById('vesselHeight');
@@ -1480,27 +2197,48 @@ document.addEventListener('DOMContentLoaded', () => {
         verticalBtn.classList.add('active');
         horizontalBtn.classList.remove('active');
         steamBtn.classList.remove('active');
-        verticalContent.style.display = 'block';
-        horizontalContent.style.display = 'none';
-        steamContent.style.display = 'none';
+        if (verticalContent) {
+            verticalContent.style.display = 'block';
+            verticalContent.style.visibility = 'visible';
+        }
+        if (horizontalContent) {
+            horizontalContent.style.display = 'none';
+        }
+        if (steamContent) {
+            steamContent.style.display = 'none';
+        }
     });
 
     horizontalBtn.addEventListener('click', () => {
         horizontalBtn.classList.add('active');
         verticalBtn.classList.remove('active');
         steamBtn.classList.remove('active');
-        horizontalContent.style.display = 'block';
-        verticalContent.style.display = 'none';
-        steamContent.style.display = 'none';
+        if (horizontalContent) {
+            horizontalContent.style.display = 'block';
+            horizontalContent.style.visibility = 'visible';
+        }
+        if (verticalContent) {
+            verticalContent.style.display = 'none';
+        }
+        if (steamContent) {
+            steamContent.style.display = 'none';
+        }
     });
 
     steamBtn.addEventListener('click', () => {
         steamBtn.classList.add('active');
         verticalBtn.classList.remove('active');
         horizontalBtn.classList.remove('active');
-        steamContent.style.display = 'block';
-        verticalContent.style.display = 'none';
-        horizontalContent.style.display = 'none';
+        if (steamContent) {
+            steamContent.style.display = 'block';
+            steamContent.style.visibility = 'visible'; /* 确保可见 */
+        }
+        if (verticalContent) {
+            verticalContent.style.display = 'none';
+        }
+        if (horizontalContent) {
+            horizontalContent.style.display = 'none';
+        }
     });
 
     // 绑定计算按钮事件
@@ -1587,6 +2325,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const ksValueGroup = document.getElementById('ksValue').parentElement;
     const velocityMultiplierGroup = document.getElementById('velocityMultiplier').parentElement;
     
+    const targetVelocityRatioGroupH = document.getElementById('targetVelocityRatioGroupH');
+    
     calcModeSelectH.addEventListener('change', (e) => {
         if (e.target.value === 'auto') {
             // 自动模式：显示所有设计参数
@@ -1595,6 +2335,9 @@ document.addEventListener('DOMContentLoaded', () => {
             liquidLevelRatioGroup.style.display = 'block';
             ksValueGroup.style.display = 'block';
             velocityMultiplierGroup.style.display = 'block';
+            if (targetVelocityRatioGroupH) {
+                targetVelocityRatioGroupH.style.display = 'none';
+            }
         } else if (e.target.value === 'manual-diameter') {
             // 手动输入直径模式：显示直径输入，保留长径比和液位比
             lengthDiameterRatioGroup.style.display = 'block';
@@ -1602,6 +2345,9 @@ document.addEventListener('DOMContentLoaded', () => {
             liquidLevelRatioGroup.style.display = 'block';
             ksValueGroup.style.display = 'block';
             velocityMultiplierGroup.style.display = 'none'; // 校核模式不需要输入 vh/vt 倍数
+            if (targetVelocityRatioGroupH) {
+                targetVelocityRatioGroupH.style.display = 'block'; // 校核模式显示目标防夹带速度比值
+            }
         }
     });
 
@@ -1612,12 +2358,18 @@ document.addEventListener('DOMContentLoaded', () => {
         liquidLevelRatioGroup.style.display = 'block';
         ksValueGroup.style.display = 'block';
         velocityMultiplierGroup.style.display = 'block';
+        if (targetVelocityRatioGroupH) {
+            targetVelocityRatioGroupH.style.display = 'none';
+        }
     } else if (calcModeSelectH.value === 'manual-diameter') {
         lengthDiameterRatioGroup.style.display = 'block';
         diameterInputGroupH.style.display = 'block';
         liquidLevelRatioGroup.style.display = 'block';
         ksValueGroup.style.display = 'block';
         velocityMultiplierGroup.style.display = 'none';
+        if (targetVelocityRatioGroupH) {
+            targetVelocityRatioGroupH.style.display = 'block';
+        }
     }
 
     // K值输入框变化时更新丝网规格提示

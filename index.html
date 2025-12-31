@@ -41,6 +41,16 @@
             <!-- 左侧：参数输入区 -->
             <section class="input-section">
                 <h2>输入参数</h2>
+                <div class="form-group calc-mode-group">
+                    <label for="calcMode">计算模式</label>
+                    <select id="calcMode" class="input-field">
+                        <option value="auto">自动计算直径（选型模式）</option>
+                        <option value="manual-velocity">手动输入设计气速</option>
+                        <option value="manual-diameter">手动输入直径（校核模式）</option>
+                    </select>
+                    <small class="hint">选择计算模式以确定需要输入的参数</small>
+                </div>
+
                 <div class="form-group">
                     <label for="refrigerant">制冷剂类型</label>
                     <select id="refrigerant" class="input-field">
@@ -88,15 +98,6 @@
                     <input type="number" id="superheat" class="input-field" value="5" step="0.1" min="0">
                 </div>
 
-                <div class="form-group">
-                    <label for="calcMode">计算模式</label>
-                    <select id="calcMode" class="input-field">
-                        <option value="auto">自动计算直径（选型模式）</option>
-                        <option value="manual-velocity">手动输入设计气速</option>
-                        <option value="manual-diameter">手动输入直径（校核模式）</option>
-                    </select>
-                </div>
-
                 <div class="form-group" id="dropletSizeGroup">
                     <label for="dropletSize">液滴直径 Dp (µm)</label>
                     <input type="number" id="dropletSize" class="input-field" value="152" step="1" min="100" max="200">
@@ -135,6 +136,11 @@
                         <span class="result-unit">kg/s</span>
                     </div>
                     <div class="result-item">
+                        <span class="result-label">进口体积流量</span>
+                        <span class="result-value" id="volumeFlow">-</span>
+                        <span class="result-unit">m³/s</span>
+                    </div>
+                    <div class="result-item">
                         <span class="result-label">吸气气体密度</span>
                         <span class="result-value" id="gasDensity">-</span>
                         <span class="result-unit">kg/m³</span>
@@ -155,6 +161,11 @@
                         <span class="result-unit">L</span>
                     </div>
                     <div class="result-item">
+                        <span class="result-label">实际气速 u</span>
+                        <span class="result-value" id="actualVelocity">-</span>
+                        <span class="result-unit">m/s</span>
+                    </div>
+                    <div class="result-item">
                         <span class="result-label">终端速度 vt</span>
                         <span class="result-value" id="terminalVelocity">-</span>
                         <span class="result-unit">m/s</span>
@@ -169,6 +180,12 @@
                         <span class="result-value" id="gasViscosity">-</span>
                         <span class="result-unit">Pa·s</span>
                     </div>
+                </div>
+                
+                <!-- 结论与建议部分 -->
+                <div class="conclusion-section" id="conclusionSection" style="display: none;">
+                    <h3>结论与建议</h3>
+                    <div id="conclusionContent"></div>
                 </div>
             </section>
             </main>
@@ -197,6 +214,15 @@
                 <!-- 左侧：参数输入区 -->
                 <section class="input-section">
                     <h2>输入参数</h2>
+                    <div class="form-group calc-mode-group">
+                        <label for="calcModeH">计算模式</label>
+                        <select id="calcModeH" class="input-field">
+                            <option value="auto">自动计算直径（选型模式）</option>
+                            <option value="manual-diameter">手动输入直径（校核模式）</option>
+                        </select>
+                        <small class="hint">选择计算模式以确定需要输入的参数</small>
+                    </div>
+
                     <div class="form-group">
                         <label for="refrigerantH">制冷剂类型</label>
                         <select id="refrigerantH" class="input-field">
@@ -244,14 +270,6 @@
                         <input type="number" id="superheatH" class="input-field" value="5" step="0.1" min="0">
                     </div>
 
-                    <div class="form-group">
-                        <label for="calcModeH">计算模式</label>
-                        <select id="calcModeH" class="input-field">
-                            <option value="auto">自动计算直径（选型模式）</option>
-                            <option value="manual-diameter">手动输入直径（校核模式）</option>
-                        </select>
-                    </div>
-
                     <div class="form-group" id="lengthDiameterRatioGroup">
                         <label for="lengthDiameterRatio">长径比 L/D</label>
                         <input type="number" id="lengthDiameterRatio" class="input-field" value="3.0" step="0.1" min="2.0" max="6.0">
@@ -262,6 +280,12 @@
                         <label for="diameterInputH">筒身内径 D (mm)</label>
                         <input type="number" id="diameterInputH" class="input-field" value="200" step="10" min="50" max="2000">
                         <small class="hint">输入标准直径或已有设备直径</small>
+                    </div>
+
+                    <div class="form-group" id="targetVelocityRatioGroupH" style="display: none;">
+                        <label for="targetVelocityRatioH">目标防夹带速度比值 (vh/Vre)</label>
+                        <input type="number" id="targetVelocityRatioH" class="input-field" value="0.75" step="0.05" min="0.5" max="0.9">
+                        <small class="hint">校核目标：实际水平气速与防夹带速度的比值（推荐: 0.6-0.8，默认 0.75）</small>
                     </div>
 
                     <div class="form-group">
@@ -343,6 +367,11 @@
                             <span class="result-unit">kg/s</span>
                         </div>
                         <div class="result-item">
+                            <span class="result-label">进口体积流量</span>
+                            <span class="result-value" id="volumeFlowH">-</span>
+                            <span class="result-unit">m³/s</span>
+                        </div>
+                        <div class="result-item">
                             <span class="result-label">气体密度</span>
                             <span class="result-value" id="gasDensityH">-</span>
                             <span class="result-unit">kg/m³</span>
@@ -368,7 +397,7 @@
                             <span class="result-unit">mm</span>
                         </div>
                         <div class="result-item">
-                            <span class="result-label">水平气速 vh</span>
+                            <span class="result-label">实际水平气速 vh</span>
                             <span class="result-value" id="horizontalVelocityH">-</span>
                             <span class="result-unit">m/s</span>
                         </div>
@@ -387,6 +416,12 @@
                             <span class="result-value" id="volumeH">-</span>
                             <span class="result-unit">L</span>
                         </div>
+                    </div>
+                    
+                    <!-- 结论与建议部分 -->
+                    <div class="conclusion-section" id="conclusionSectionH" style="display: none;">
+                        <h3>结论与建议</h3>
+                        <div id="conclusionContentH"></div>
                     </div>
                 </section>
             </main>
@@ -506,6 +541,11 @@
                             <span class="result-unit">°C</span>
                         </div>
                         <div class="result-item">
+                            <span class="result-label">进口体积流量</span>
+                            <span class="result-value" id="volumeFlowSteam">-</span>
+                            <span class="result-unit">m³/s</span>
+                        </div>
+                        <div class="result-item">
                             <span class="result-label">液体密度 ρ_l</span>
                             <span class="result-value" id="liquidDensitySteam">-</span>
                             <span class="result-unit">kg/m³</span>
@@ -524,6 +564,11 @@
                             <span class="result-label">干蒸汽流量</span>
                             <span class="result-value" id="drySteamFlow">-</span>
                             <span class="result-unit">kg/h</span>
+                        </div>
+                        <div class="result-item">
+                            <span class="result-label">实际气速 v</span>
+                            <span class="result-value" id="actualVelocitySteam">-</span>
+                            <span class="result-unit">m/s</span>
                         </div>
                         <div class="result-item">
                             <span class="result-label">最大允许气速 v_max</span>
@@ -545,6 +590,12 @@
                             <span class="result-value" id="minArea">-</span>
                             <span class="result-unit">m²</span>
                         </div>
+                    </div>
+                    
+                    <!-- 结论与建议部分 -->
+                    <div class="conclusion-section" id="conclusionSectionSteam" style="display: none;">
+                        <h3>结论与建议</h3>
+                        <div id="conclusionContentSteam"></div>
                     </div>
                 </section>
             </main>
