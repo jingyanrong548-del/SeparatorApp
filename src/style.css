@@ -180,6 +180,21 @@ header h1 {
     .diagram-caption {
         font-size: 0.85rem;
     }
+    
+    /* 移动端SVG样式修复 */
+    .separator-svg {
+        min-height: 300px;
+        max-width: 100%;
+    }
+    
+    /* 确保水蒸气立式SVG在移动端正确显示 */
+    /* SVG viewBox是400x500，宽高比约0.8，需要确保完整显示 */
+    #steamDiagram {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 400px;
+        aspect-ratio: 400 / 500;
+    }
 }
 
 .main-content {
@@ -392,6 +407,30 @@ header h1 {
 
     .result-value {
         text-align: center;
+    }
+    
+    /* 确保SVG容器在移动端正确显示 */
+    .diagram-svg-container {
+        padding: 15px;
+        margin-bottom: 20px;
+        overflow: visible;
+    }
+    
+    .diagram-svg-container .separator-svg {
+        min-height: 300px;
+    }
+    
+    /* 水蒸汽立式SVG容器在移动端需要更多空间 */
+    #steamContent .diagram-svg-container {
+        padding: 10px;
+        overflow: visible;
+    }
+    
+    #steamContent .diagram-svg-container .separator-svg {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 400px;
+        aspect-ratio: 400 / 500;
     }
 }
 
