@@ -2019,6 +2019,263 @@ function updateMeshSpecInfo(K) {
     }
 }
 
+// 制冷满液气分计算函数 - 正在编制中
+/*
+async function calculateKnockout() {
+    try {
+        // 检查 CoolProp 是否已初始化
+        if (!CoolPropModule) {
+            showStatus('正在初始化 CoolProp...', 'info', 'statusK');
+            await initCoolProp();
+        }
+
+        // 获取输入参数
+        const refrigerant = document.getElementById('refrigerantK').value;
+        const Q_kW = parseFloat(document.getElementById('coolingCapacityK').value);
+        const Te_C = parseFloat(document.getElementById('evapTempK').value);
+        const deltaT_sh = parseFloat(document.getElementById('superheatK').value);
+        const calcModeK = document.getElementById('calcModeK').value;
+        const safetyFactor = parseFloat(document.getElementById('safetyFactorK').value);
+        const Dp = parseFloat(document.getElementById('dropletSizeK').value); // 单位：m
+        const h_liq_ratio = parseFloat(document.getElementById('liquidLevelRatioK').value);
+        const t_v = parseFloat(document.getElementById('residenceTimeK').value);
+        const inletPipeDiameter = parseFloat(document.getElementById('inletPipeDiameterK').value); // mm
+        const inletPipeCount = parseFloat(document.getElementById('inletPipeCountK').value);
+        const outletVelocityLimit = parseFloat(document.getElementById('outletVelocityLimitK').value);
+
+        // 验证输入
+        if (isNaN(Q_kW) || Q_kW <= 0) {
+            throw new Error('制冷量必须大于 0');
+        }
+        if (isNaN(Te_C)) {
+            throw new Error('请输入有效的蒸发温度');
+        }
+        if (isNaN(deltaT_sh) || deltaT_sh < 0) {
+            throw new Error('吸气过热度必须大于等于 0');
+        }
+        const deltaT_sh_calc = deltaT_sh === 0 ? 0.001 : deltaT_sh;
+        if (calcModeK === 'manual-diameter') {
+            const D_mm_input = parseFloat(document.getElementById('diameterInputK').value);
+            if (isNaN(D_mm_input) || D_mm_input <= 0) {
+                throw new Error('请输入有效的直径值');
+            }
+        }
+        if (isNaN(safetyFactor) || safetyFactor <= 0) {
+            throw new Error('安全系数必须大于 0');
+        }
+        if (isNaN(Dp) || Dp <= 0) {
+            throw new Error('液滴直径必须大于 0');
+        }
+        if (isNaN(h_liq_ratio) || h_liq_ratio < 0.1 || h_liq_ratio > 0.5) {
+            throw new Error('液位高度比必须在 0.1 - 0.5 之间');
+        }
+        if (isNaN(t_v) || t_v <= 0) {
+            throw new Error('驻留时间必须大于 0');
+        }
+
+        // 禁用计算按钮
+        const calcBtn = document.getElementById('calculateBtnK');
+        calcBtn.disabled = true;
+        calcBtn.textContent = '计算中...';
+
+        showStatus('正在计算...', 'info', 'statusK');
+
+        // 温度单位转换：°C 转 K
+        const Te_K = Te_C + 273.15;
+        const T_suc_K = Te_K + deltaT_sh_calc;
+
+        // 1. 计算蒸发压力
+        const P_sat = CoolPropModule.PropsSI('P', 'T', Te_K, 'Q', 1, refrigerant);
+        if (P_sat <= 0 || !isFinite(P_sat)) {
+            throw new Error('无法计算蒸发压力，请检查制冷剂和温度参数');
+        }
+
+        // 2. 计算吸气温度下的气体密度
+        const rho_g = CoolPropModule.PropsSI('D', 'P', P_sat, 'T', T_suc_K, refrigerant);
+        if (rho_g <= 0 || !isFinite(rho_g)) {
+            throw new Error('无法计算气体密度');
+        }
+
+        // 3. 计算饱和液体密度
+        const rho_l = CoolPropModule.PropsSI('D', 'P', P_sat, 'Q', 0, refrigerant);
+        if (rho_l <= 0 || !isFinite(rho_l)) {
+            throw new Error('无法计算液体密度');
+        }
+
+        // 4. 计算气体动力粘度
+        const eta_g = CoolPropModule.PropsSI('V', 'P', P_sat, 'T', T_suc_K, refrigerant);
+        if (eta_g <= 0 || !isFinite(eta_g)) {
+            throw new Error('无法计算气体动力粘度');
+        }
+
+        // 5. 计算液体动力粘度
+        let eta_l;
+        try {
+            eta_l = CoolPropModule.PropsSI('V', 'P', P_sat, 'Q', 0, refrigerant);
+            if (!isFinite(eta_l) || eta_l <= 0) {
+                eta_l = 0.0002; // 默认值
+            }
+        } catch (e) {
+            eta_l = 0.0002; // 默认值
+        }
+
+        // 6. 计算吸气状态下的气体焓值
+        const h_gas = CoolPropModule.PropsSI('H', 'P', P_sat, 'T', T_suc_K, refrigerant);
+        if (!isFinite(h_gas)) {
+            throw new Error('无法计算气体焓值');
+        }
+
+        // 7. 计算饱和液体的焓值
+        const h_liq = CoolPropModule.PropsSI('H', 'P', P_sat, 'Q', 0, refrigerant);
+        if (!isFinite(h_liq)) {
+            throw new Error('无法计算液体焓值');
+        }
+
+        // 8. 计算焓差
+        const delta_h = h_gas - h_liq;
+        if (delta_h <= 0 || !isFinite(delta_h)) {
+            throw new Error('焓差计算异常，请检查过热度设置');
+        }
+
+        // 9. 计算质量流量 (kg/s) - 按制冷量计算
+        const m_dot = (Q_kW * 1000) / delta_h;
+
+        // 10. 计算气体体积流量 (m³/s) - 按制冷量计算
+        const V_g = m_dot / rho_g;
+
+        // 11. 计算终端速度 vt (使用迭代法)
+        const g = 9.81;
+        const vt = calculateTerminalVelocity(Dp, rho_l, rho_g, eta_g, g);
+        if (vt <= 0 || !isFinite(vt)) {
+            throw new Error('无法计算终端速度');
+        }
+
+        // 12. 根据计算模式确定直径和长度
+        let D_m; // 直径（米）
+        let L_m; // 长度（米）
+        const A_gas_ratio = calculateGasAreaRatio(h_liq_ratio);
+
+        if (calcModeK === 'manual-diameter') {
+            // 手动输入直径模式（校核模式）
+            const D_mm_input = parseFloat(document.getElementById('diameterInputK').value);
+            D_m = D_mm_input / 1000; // 转换为米
+            
+            // 计算实际水平气速
+            const A_total = Math.PI * Math.pow(D_m / 2, 2);
+            const A_gas = A_total * A_gas_ratio;
+            const vh = V_g / A_gas;
+            
+            // 计算所需长度（满足驻留时间要求）
+            const H_gas = D_m * (1 - h_liq_ratio);
+            const S_l = H_gas;
+            L_m = (S_l / vt) * vh * safetyFactor;
+        } else {
+            // 自动计算模式
+            // 根据驻留时间和终端速度计算
+            // 初步估算：使用经验公式
+            const vh_estimated = vt * 3.0; // 假设水平气速为终端速度的3倍
+            
+            // 根据体积流量和设计气速计算直径
+            // V_g = vh * A_gas = vh * (π * D²/4 * A_gas_ratio)
+            // D = sqrt(4 * V_g / (π * vh * A_gas_ratio))
+            D_m = Math.sqrt((4 * V_g) / (Math.PI * vh_estimated * A_gas_ratio));
+            
+            // 计算实际气速
+            const A_total = Math.PI * Math.pow(D_m / 2, 2);
+            const A_gas = A_total * A_gas_ratio;
+            const vh = V_g / A_gas;
+            
+            // 根据驻留时间计算长度
+            const H_gas = D_m * (1 - h_liq_ratio);
+            const S_l = H_gas;
+            L_m = Math.max((S_l / vt) * vh * safetyFactor, vh * t_v);
+        }
+
+        // 转换为 mm
+        const D_mm = D_m * 1000;
+        const L_mm = L_m * 1000;
+
+        // 13. 计算推荐的结构参数
+        // L1: 挡液板长度（圆筒长度），通常为总长度的80-90%
+        const L1_mm = L_mm * 0.85;
+        
+        // L2: 进气管间距，根据经验公式：L2 = D / 3 到 D / 2
+        const L2_mm = D_mm / 3.5;
+        
+        // Di: 进气管内径，根据流速要求计算
+        // 假设进气管流速为 5-10 m/s
+        const inlet_velocity = 7.5; // m/s
+        const V_g_per_pipe = V_g / inletPipeCount; // 每个进气管的体积流量
+        const Di_m = Math.sqrt((4 * V_g_per_pipe) / (Math.PI * inlet_velocity));
+        const Di_mm = Math.max(Di_m * 1000, inletPipeDiameter || 50); // 使用输入值或计算值
+        
+        // Do: 出气管内径，根据出口流速限值计算
+        const Do_m = Math.sqrt((4 * V_g) / (Math.PI * outletVelocityLimit));
+        const Do_mm = Do_m * 1000;
+
+        // 14. 计算筒内容积
+        const Vol_m3 = Math.PI * Math.pow(D_m / 2, 2) * L_m;
+        const Vol_L = Vol_m3 * 1000;
+
+        // 15. 计算液体停留时间
+        const liquid_volume_ratio = 1 - calculateGasAreaRatio(h_liq_ratio);
+        const liquid_volume_m3 = Vol_m3 * liquid_volume_ratio;
+        // 估算液体流量（假设为总流量的10%）
+        const liquid_flow_m3_s = V_g * 0.1 * (rho_g / rho_l);
+        const residence_time = liquid_volume_m3 / Math.max(liquid_flow_m3_s, 1e-6);
+
+        // 16. 计算实际水平气速
+        const A_total_final = Math.PI * Math.pow(D_m / 2, 2);
+        const A_gas_final = A_total_final * A_gas_ratio;
+        const vh_final = V_g / A_gas_final;
+
+        // 更新结果显示
+        document.getElementById('massFlowK').textContent = formatNumber(m_dot, 3);
+        document.getElementById('volumeFlowK').textContent = formatNumber(V_g, 6);
+        document.getElementById('gasDensityK').textContent = formatNumber(rho_g, 2);
+        document.getElementById('liquidDensityK').textContent = formatNumber(rho_l, 2);
+        document.getElementById('terminalVelocityK').textContent = formatNumber(vt, 3);
+        document.getElementById('diameterK').textContent = formatNumber(D_mm, 0);
+        document.getElementById('lengthK').textContent = formatNumber(L_mm, 0);
+        document.getElementById('baffleLengthK').textContent = formatNumber(L1_mm, 0);
+        document.getElementById('inletSpacingK').textContent = formatNumber(L2_mm, 0);
+        document.getElementById('inletDiameterK').textContent = formatNumber(Di_mm, 0);
+        document.getElementById('outletDiameterK').textContent = formatNumber(Do_mm, 0);
+        document.getElementById('actualVelocityK').textContent = formatNumber(vh_final, 3);
+        document.getElementById('residenceTimeResultK').textContent = formatNumber(residence_time, 1);
+
+        // 更新SVG示意图
+        drawKnockoutSeparator(D_mm, L_mm, L1_mm, L2_mm, Di_mm, Do_mm, h_liq_ratio, inletPipeCount);
+
+        showStatus('✓ 计算完成！', 'success', 'statusK');
+
+    } catch (error) {
+        console.error('计算错误:', error);
+        showStatus('错误: ' + error.message, 'error', 'statusK');
+        
+        // 清空结果显示
+        document.getElementById('massFlowK').textContent = '-';
+        document.getElementById('volumeFlowK').textContent = '-';
+        document.getElementById('gasDensityK').textContent = '-';
+        document.getElementById('liquidDensityK').textContent = '-';
+        document.getElementById('terminalVelocityK').textContent = '-';
+        document.getElementById('diameterK').textContent = '-';
+        document.getElementById('lengthK').textContent = '-';
+        document.getElementById('baffleLengthK').textContent = '-';
+        document.getElementById('inletSpacingK').textContent = '-';
+        document.getElementById('inletDiameterK').textContent = '-';
+        document.getElementById('outletDiameterK').textContent = '-';
+        document.getElementById('actualVelocityK').textContent = '-';
+        document.getElementById('residenceTimeResultK').textContent = '-';
+    } finally {
+        // 恢复计算按钮
+        const calcBtn = document.getElementById('calculateBtnK');
+        calcBtn.disabled = false;
+        calcBtn.textContent = '计算';
+    }
+}
+*/
+
 // 水蒸汽立式计算函数
 async function calculateSteam() {
     try {
@@ -2226,6 +2483,301 @@ async function calculateSteam() {
     }
 }
 
+// 绘制制冷满液气分SVG示意图 - 正在编制中
+// 参数：diameter (mm), length (mm), L1 (mm), L2 (mm), Di (mm), Do (mm), liquidLevelRatio (0-1), inletPipeCount
+/*
+function drawKnockoutSeparator(diameter, length, L1, L2, Di, Do, liquidLevelRatio, inletPipeCount = 3) {
+    const svg = document.getElementById('knockoutDiagram');
+    if (!svg) return;
+
+    const svgWidth = 800;
+    const svgHeight = 400;
+    
+    // ========== 水平容器图区域 (左侧) ==========
+    const horizontalX = 50;
+    const horizontalY = 100;
+    const horizontalWidth = 300;
+    const horizontalHeight = 120;
+    
+    // 计算长径比，调整显示尺寸
+    const aspectRatio = length / diameter;
+    let displayWidth = Math.min(horizontalWidth, horizontalHeight * aspectRatio);
+    let displayHeight = displayWidth / aspectRatio;
+    if (displayHeight > horizontalHeight) {
+        displayHeight = horizontalHeight;
+        displayWidth = displayHeight * aspectRatio;
+    }
+    
+    const startX = horizontalX;
+    const startY = horizontalY + (horizontalHeight - displayHeight) / 2;
+    const endX = startX + displayWidth;
+    const endY = startY + displayHeight;
+    
+    // 液位位置
+    const liquidHeight = displayHeight * liquidLevelRatio;
+    const liquidTopY = endY - liquidHeight;
+    
+    // 更新筒身
+    const tankBody = document.getElementById('knockoutTankBody');
+    if (tankBody) {
+        tankBody.setAttribute('x', startX);
+        tankBody.setAttribute('y', startY);
+        tankBody.setAttribute('width', displayWidth);
+        tankBody.setAttribute('height', displayHeight);
+    }
+    
+    // 更新左侧端部
+    const leftEnd = document.getElementById('knockoutLeftEnd');
+    if (leftEnd) {
+        leftEnd.setAttribute('cx', startX);
+        leftEnd.setAttribute('cy', startY + displayHeight / 2);
+        leftEnd.setAttribute('rx', '8');
+        leftEnd.setAttribute('ry', displayHeight / 2);
+    }
+    
+    // 更新右侧端部
+    const rightEnd = document.getElementById('knockoutRightEnd');
+    if (rightEnd) {
+        rightEnd.setAttribute('cx', endX);
+        rightEnd.setAttribute('cy', startY + displayHeight / 2);
+        rightEnd.setAttribute('rx', '8');
+        rightEnd.setAttribute('ry', displayHeight / 2);
+    }
+    
+    // 更新液体区域
+    const liquidArea = document.getElementById('knockoutLiquidArea');
+    if (liquidArea) {
+        liquidArea.setAttribute('x', startX);
+        liquidArea.setAttribute('y', liquidTopY);
+        liquidArea.setAttribute('width', displayWidth);
+        liquidArea.setAttribute('height', liquidHeight);
+        if (liquidHeight > 0) {
+            liquidArea.setAttribute('rx', '8');
+            liquidArea.setAttribute('ry', '8');
+        }
+    }
+    
+    // 更新液位线
+    const liquidLevel = document.getElementById('knockoutLiquidLevel');
+    if (liquidLevel) {
+        liquidLevel.setAttribute('x1', startX);
+        liquidLevel.setAttribute('y1', liquidTopY);
+        liquidLevel.setAttribute('x2', endX);
+        liquidLevel.setAttribute('y2', liquidTopY);
+    }
+    
+    // 更新进气管
+    const inletPipes = document.getElementById('knockoutInletPipes');
+    if (inletPipes) {
+        inletPipes.innerHTML = '';
+        const pipeSpacing = Math.min(L2, displayWidth / (inletPipeCount + 1));
+        const firstPipeX = startX + (displayWidth - (inletPipeCount - 1) * pipeSpacing) / 2;
+        
+        for (let i = 0; i < inletPipeCount; i++) {
+            const pipeX = firstPipeX + i * pipeSpacing;
+            // 进气管（从底部向上）
+            const pipe = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            pipe.setAttribute('x1', pipeX);
+            pipe.setAttribute('y1', endY + 20);
+            pipe.setAttribute('x2', pipeX);
+            pipe.setAttribute('y2', endY);
+            pipe.setAttribute('stroke', '#0277bd');
+            pipe.setAttribute('stroke-width', '3');
+            inletPipes.appendChild(pipe);
+            
+            // 标注 Di
+            if (i === 0) {
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', pipeX);
+                label.setAttribute('y', endY + 40);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '11');
+                label.setAttribute('fill', '#0277bd');
+                label.setAttribute('font-weight', 'bold');
+                label.textContent = `Di=${formatNumber(Di, 0)}`;
+                inletPipes.appendChild(label);
+            }
+        }
+    }
+    
+    // 更新出气管
+    const outletPipe = document.getElementById('knockoutOutletPipe');
+    const outletArrow = document.getElementById('knockoutOutletArrow');
+    if (outletPipe && outletArrow) {
+        outletPipe.setAttribute('x1', endX);
+        outletPipe.setAttribute('y1', startY);
+        outletPipe.setAttribute('x2', endX + 30);
+        outletPipe.setAttribute('y2', startY - 20);
+        outletArrow.setAttribute('points', `${endX + 25},${startY - 22} ${endX + 30},${startY - 20} ${endX + 25},${startY - 18}`);
+    }
+    
+    // 更新尺寸标注 - 直径
+    const diameterLine = document.getElementById('knockoutDiameterLine');
+    const diameterLabel = document.getElementById('knockoutDiameterLabel');
+    if (diameterLine) {
+        diameterLine.setAttribute('x1', startX - 30);
+        diameterLine.setAttribute('y1', startY);
+        diameterLine.setAttribute('x2', startX - 30);
+        diameterLine.setAttribute('y2', endY);
+    }
+    if (diameterLabel) {
+        diameterLabel.setAttribute('x', startX - 45);
+        diameterLabel.setAttribute('y', startY + displayHeight / 2);
+        diameterLabel.textContent = `Do=${formatNumber(diameter, 0)}`;
+    }
+    
+    // 更新尺寸标注 - 总长度 L
+    const lengthLine = document.getElementById('knockoutLengthLine');
+    const lengthLabel = document.getElementById('knockoutLengthLabel');
+    if (lengthLine) {
+        lengthLine.setAttribute('x1', startX);
+        lengthLine.setAttribute('y1', endY + 30);
+        lengthLine.setAttribute('x2', endX);
+        lengthLine.setAttribute('y2', endY + 30);
+    }
+    if (lengthLabel) {
+        lengthLabel.setAttribute('x', (startX + endX) / 2);
+        lengthLabel.setAttribute('y', endY + 50);
+        lengthLabel.textContent = `L=${formatNumber(length, 0)}`;
+    }
+    
+    // 更新尺寸标注 - L1
+    const L1Line = document.getElementById('knockoutL1Line');
+    const L1Label = document.getElementById('knockoutL1Label');
+    if (L1Line && L1Label) {
+        const L1DisplayWidth = displayWidth * (L1 / length);
+        const L1StartX = startX + (displayWidth - L1DisplayWidth) / 2;
+        L1Line.setAttribute('x1', L1StartX);
+        L1Line.setAttribute('y1', endY + 60);
+        L1Line.setAttribute('x2', L1StartX + L1DisplayWidth);
+        L1Line.setAttribute('y2', endY + 60);
+        L1Label.setAttribute('x', (L1StartX + L1StartX + L1DisplayWidth) / 2);
+        L1Label.setAttribute('y', endY + 75);
+        L1Label.textContent = `L1=${formatNumber(L1, 0)}`;
+    }
+    
+    // 更新尺寸标注 - L2
+    const L2Line = document.getElementById('knockoutL2Line');
+    const L2Label = document.getElementById('knockoutL2Label');
+    if (L2Line && L2Label && inletPipeCount > 1) {
+        const L2DisplayWidth = displayWidth * (L2 / length);
+        const firstPipeDisplayX = startX + (displayWidth - (inletPipeCount - 1) * Math.min(L2, displayWidth / (inletPipeCount + 1))) / 2;
+        L2Line.setAttribute('x1', firstPipeDisplayX);
+        L2Line.setAttribute('y1', liquidTopY + 15);
+        L2Line.setAttribute('x2', firstPipeDisplayX + L2DisplayWidth);
+        L2Line.setAttribute('y2', liquidTopY + 15);
+        L2Label.setAttribute('x', firstPipeDisplayX + L2DisplayWidth / 2);
+        L2Label.setAttribute('y', liquidTopY + 30);
+        L2Label.textContent = `L2=${formatNumber(L2, 0)}`;
+    }
+    
+    // ========== 截面图区域 (右侧) ==========
+    const crossX = 450;
+    const crossY = 50;
+    const crossR = 100; // 半径
+    const crossCenterX = crossX + 150;
+    const crossCenterY = crossY + 150;
+    
+    // 更新圆形截面
+    const crossCircle = document.getElementById('knockoutCrossCircle');
+    if (crossCircle) {
+        crossCircle.setAttribute('cx', crossCenterX);
+        crossCircle.setAttribute('cy', crossCenterY);
+        crossCircle.setAttribute('r', crossR);
+    }
+    
+    // 计算液位在圆形截面中的位置
+    const liquidHeight_cross = crossR * 2 * liquidLevelRatio; // 从底部到液面的高度
+    const liquidTopY_cross = crossCenterY + crossR - liquidHeight_cross;
+    
+    // 计算液体区域的路径（下半部分扇形）
+    const d_over_R = 1 - 2 * liquidLevelRatio; // 液面到圆心的距离/半径
+    const theta_half = Math.acos(Math.max(-1, Math.min(1, d_over_R)));
+    const theta = 2 * theta_half;
+    
+    // 液体区域路径（从底部中心开始，沿圆弧到液面，再沿液面回到中心）
+    const liquidPath = document.getElementById('knockoutCrossLiquid');
+    if (liquidPath) {
+        const startAngle = Math.PI - theta_half;
+        const endAngle = Math.PI + theta_half;
+        const startX_cross = crossCenterX + crossR * Math.cos(startAngle);
+        const startY_cross = crossCenterY + crossR * Math.sin(startAngle);
+        const endX_cross = crossCenterX + crossR * Math.cos(endAngle);
+        const endY_cross = crossCenterY + crossR * Math.sin(endAngle);
+        
+        // 创建扇形路径
+        const largeArcFlag = theta > Math.PI ? 1 : 0;
+        const pathData = `M ${crossCenterX} ${crossCenterY + crossR} ` +
+                        `L ${startX_cross} ${startY_cross} ` +
+                        `A ${crossR} ${crossR} 0 ${largeArcFlag} 1 ${endX_cross} ${endY_cross} ` +
+                        `Z`;
+        liquidPath.setAttribute('d', pathData);
+    }
+    
+    // 更新液位线
+    const crossLiquidLevel = document.getElementById('knockoutCrossLiquidLevel');
+    if (crossLiquidLevel) {
+        const chordLength = 2 * crossR * Math.sin(theta_half);
+        const leftX = crossCenterX - chordLength / 2;
+        const rightX = crossCenterX + chordLength / 2;
+        crossLiquidLevel.setAttribute('x1', leftX);
+        crossLiquidLevel.setAttribute('y1', liquidTopY_cross);
+        crossLiquidLevel.setAttribute('x2', rightX);
+        crossLiquidLevel.setAttribute('y2', liquidTopY_cross);
+    }
+    
+    // 更新角度线
+    const angleLine = document.getElementById('knockoutAngleLine');
+    const angleLine2 = document.getElementById('knockoutAngleLine2');
+    const angleLabel = document.getElementById('knockoutAngleLabel');
+    if (angleLine && angleLine2) {
+        // 从圆心到顶部的线
+        angleLine.setAttribute('x1', crossCenterX);
+        angleLine.setAttribute('y1', crossCenterY);
+        angleLine.setAttribute('x2', crossCenterX);
+        angleLine.setAttribute('y2', crossY + 50);
+        // 从圆心到液面右侧的线
+        const angle = Math.PI - theta_half;
+        angleLine2.setAttribute('x1', crossCenterX);
+        angleLine2.setAttribute('y1', crossCenterY);
+        angleLine2.setAttribute('x2', crossCenterX + crossR * Math.cos(angle));
+        angleLine2.setAttribute('y2', crossCenterY + crossR * Math.sin(angle));
+        
+        // 角度标注（120度或计算角度）
+        const angleDeg = (theta / Math.PI) * 180;
+        if (angleLabel) {
+            const labelX = crossCenterX + crossR * 0.6;
+            const labelY = crossCenterY - crossR * 0.3;
+            angleLabel.setAttribute('x', labelX);
+            angleLabel.setAttribute('y', labelY);
+            angleLabel.textContent = `${formatNumber(angleDeg, 0)}°`;
+        }
+    }
+    
+    // 更新直径标注
+    const crossDiameterLabel = document.getElementById('knockoutCrossDiameterLabel');
+    if (crossDiameterLabel) {
+        crossDiameterLabel.setAttribute('x', crossCenterX);
+        crossDiameterLabel.setAttribute('y', crossY + 250);
+        crossDiameterLabel.textContent = `φD=${formatNumber(diameter, 0)}`;
+    }
+    
+    // 更新液位高度标注
+    const liquidHeightLine = document.getElementById('knockoutLiquidHeightLine');
+    const liquidHeightLabel = document.getElementById('knockoutLiquidHeightLabel');
+    if (liquidHeightLine && liquidHeightLabel) {
+        const labelX = crossX + 260;
+        liquidHeightLine.setAttribute('x1', labelX);
+        liquidHeightLine.setAttribute('y1', liquidTopY_cross);
+        liquidHeightLine.setAttribute('x2', labelX);
+        liquidHeightLine.setAttribute('y2', crossCenterY + crossR);
+        liquidHeightLabel.setAttribute('x', labelX + 20);
+        liquidHeightLabel.setAttribute('y', (liquidTopY_cross + crossCenterY + crossR) / 2);
+        liquidHeightLabel.textContent = `H=${formatNumber(diameter * liquidLevelRatio, 0)}`;
+    }
+}
+*/
+
 // 更新水蒸汽立式 SVG 示意图
 function updateSteamDiagram(diameter_mm, height_mm, inletDryness, liquidRatio) {
     const svg = document.getElementById('steamDiagram');
@@ -2295,9 +2847,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 类型切换功能
     const verticalBtn = document.getElementById('verticalBtn');
     const horizontalBtn = document.getElementById('horizontalBtn');
+    const knockoutBtn = document.getElementById('knockoutBtn');
     const steamBtn = document.getElementById('steamBtn');
     const verticalContent = document.getElementById('verticalContent');
     const horizontalContent = document.getElementById('horizontalContent');
+    const knockoutContent = document.getElementById('knockoutContent');
     const steamContent = document.getElementById('steamContent');
     
     // 设置初始显示状态（确保只有制冷立式显示）
@@ -2309,6 +2863,10 @@ document.addEventListener('DOMContentLoaded', () => {
         horizontalContent.style.display = 'none';
         horizontalContent.style.visibility = 'hidden';
     }
+    if (knockoutContent) {
+        knockoutContent.style.display = 'none';
+        knockoutContent.style.visibility = 'hidden';
+    }
     if (steamContent) {
         steamContent.style.display = 'none';
         steamContent.style.visibility = 'hidden';
@@ -2317,6 +2875,7 @@ document.addEventListener('DOMContentLoaded', () => {
     verticalBtn.addEventListener('click', () => {
         verticalBtn.classList.add('active');
         horizontalBtn.classList.remove('active');
+        if (knockoutBtn) knockoutBtn.classList.remove('active');
         steamBtn.classList.remove('active');
         if (verticalContent) {
             verticalContent.style.display = 'block';
@@ -2325,6 +2884,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (horizontalContent) {
             horizontalContent.style.display = 'none';
             horizontalContent.style.visibility = 'hidden';
+        }
+        if (knockoutContent) {
+            knockoutContent.style.display = 'none';
+            knockoutContent.style.visibility = 'hidden';
         }
         if (steamContent) {
             steamContent.style.display = 'none';
@@ -2335,6 +2898,7 @@ document.addEventListener('DOMContentLoaded', () => {
     horizontalBtn.addEventListener('click', () => {
         horizontalBtn.classList.add('active');
         verticalBtn.classList.remove('active');
+        if (knockoutBtn) knockoutBtn.classList.remove('active');
         steamBtn.classList.remove('active');
         if (horizontalContent) {
             horizontalContent.style.display = 'block';
@@ -2344,16 +2908,49 @@ document.addEventListener('DOMContentLoaded', () => {
             verticalContent.style.display = 'none';
             verticalContent.style.visibility = 'hidden';
         }
+        if (knockoutContent) {
+            knockoutContent.style.display = 'none';
+            knockoutContent.style.visibility = 'hidden';
+        }
         if (steamContent) {
             steamContent.style.display = 'none';
             steamContent.style.visibility = 'hidden';
         }
     });
 
+    // 制冷满液气分按钮事件处理 - 正在编制中
+    /*
+    if (knockoutBtn) {
+        knockoutBtn.addEventListener('click', () => {
+            knockoutBtn.classList.add('active');
+            verticalBtn.classList.remove('active');
+            horizontalBtn.classList.remove('active');
+            steamBtn.classList.remove('active');
+            if (knockoutContent) {
+                knockoutContent.style.display = 'block';
+                knockoutContent.style.visibility = 'visible';
+            }
+            if (verticalContent) {
+                verticalContent.style.display = 'none';
+                verticalContent.style.visibility = 'hidden';
+            }
+            if (horizontalContent) {
+                horizontalContent.style.display = 'none';
+                horizontalContent.style.visibility = 'hidden';
+            }
+            if (steamContent) {
+                steamContent.style.display = 'none';
+                steamContent.style.visibility = 'hidden';
+            }
+        });
+    }
+    */
+
     steamBtn.addEventListener('click', () => {
         steamBtn.classList.add('active');
         verticalBtn.classList.remove('active');
         horizontalBtn.classList.remove('active');
+        if (knockoutBtn) knockoutBtn.classList.remove('active');
         if (steamContent) {
             steamContent.style.display = 'block';
             steamContent.style.visibility = 'visible';
@@ -2366,6 +2963,10 @@ document.addEventListener('DOMContentLoaded', () => {
             horizontalContent.style.display = 'none';
             horizontalContent.style.visibility = 'hidden';
         }
+        if (knockoutContent) {
+            knockoutContent.style.display = 'none';
+            knockoutContent.style.visibility = 'hidden';
+        }
     });
 
     // 绑定计算按钮事件
@@ -2374,6 +2975,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const calcBtnH = document.getElementById('calculateBtnH');
     calcBtnH.addEventListener('click', calculateHorizontal);
+    
+    // 制冷满液气分计算按钮事件处理 - 正在编制中
+    /*
+    const calcBtnK = document.getElementById('calculateBtnK');
+    if (calcBtnK) {
+        calcBtnK.addEventListener('click', calculateKnockout);
+    }
+    */
     
     const calcBtnSteam = document.getElementById('calculateBtnSteam');
     if (calcBtnSteam) {
@@ -2390,6 +2999,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     calculate();
                 } else if (horizontalContent.style.display !== 'none') {
                     calculateHorizontal();
+                } else if (knockoutContent && knockoutContent.style.display !== 'none') {
+                    // calculateKnockout(); // 正在编制中
                 } else if (steamContent && steamContent.style.display !== 'none') {
                     calculateSteam();
                 }
@@ -2496,6 +3107,37 @@ document.addEventListener('DOMContentLoaded', () => {
         velocityMultiplierGroup.style.display = 'none';
         if (targetVelocityRatioGroupH) {
             targetVelocityRatioGroupH.style.display = 'block';
+        }
+    }
+
+    // 制冷满液气分计算模式切换
+    const calcModeSelectK = document.getElementById('calcModeK');
+    const diameterInputGroupK = document.getElementById('diameterInputGroupK');
+    
+    if (calcModeSelectK) {
+        calcModeSelectK.addEventListener('change', (e) => {
+            if (e.target.value === 'auto') {
+                // 自动模式：隐藏直径输入
+                if (diameterInputGroupK) {
+                    diameterInputGroupK.style.display = 'none';
+                }
+            } else if (e.target.value === 'manual-diameter') {
+                // 手动输入直径模式：显示直径输入
+                if (diameterInputGroupK) {
+                    diameterInputGroupK.style.display = 'block';
+                }
+            }
+        });
+        
+        // 初始化显示状态（制冷满液气分）
+        if (calcModeSelectK.value === 'auto') {
+            if (diameterInputGroupK) {
+                diameterInputGroupK.style.display = 'none';
+            }
+        } else if (calcModeSelectK.value === 'manual-diameter') {
+            if (diameterInputGroupK) {
+                diameterInputGroupK.style.display = 'block';
+            }
         }
     }
 
