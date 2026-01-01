@@ -518,7 +518,7 @@ async function calculateHorizontal() {
         const VL = liquid_flow_m3_s / Math.max(A_liquid, 1e-6); // 液体流速 (m/s)
         
         // 4. 计算液体雷诺数 Rel (Excel中的B34)
-        // Rel = dh * VL / μl * ρl = dhl * VL * ρl / eta_l
+        // Rel = dh * VL / μl * ρl = dhl * VL * rho_l / eta_l
         const Rel = (dhl * VL * rho_l) / eta_l;
         
         // 5. 计算密度系数 Rp (Excel中的B35)
@@ -536,7 +536,8 @@ async function calculateHorizontal() {
         
         // 7. 根据Excel逻辑计算Vre（5个互斥条件，选择一个公式）
         // 注意：Excel中σ的单位是mN/m，所以公式中需要乘以0.001转换为N/m
-        const sigma_factor = sigma_mN_m * 0.001; // σ在公式中使用时转换为N/m
+        // Excel中B42 = SUM(B37:B41)，但由于条件互斥，实际只有一个条件满足
+        const sigma_factor = sigma_mN_m * 0.001; // σ在公式中使用时转换为N/m (N/m)
         let v_max_entrainment;
         let condition_used = '';
         
