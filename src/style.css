@@ -109,9 +109,9 @@ header h1 {
 .separator-content {
     width: 100%;
     min-height: 100px; /* 确保在移动端有最小高度 */
-    display: block; /* 确保显示 */
     position: relative; /* 确保定位正常 */
     overflow: visible; /* 确保内容不被裁剪 */
+    /* display 由JavaScript控制，不在这里设置默认值 */
 }
 
 /* SVG示意图容器 */
@@ -479,32 +479,37 @@ header h1 {
         aspect-ratio: 400 / 500;
     }
     
-    /* 确保水蒸汽立式内容在移动端正确显示 */
-    #steamContent.separator-content {
-        display: block !important; /* 当激活时强制显示 */
-        width: 100% !important;
-        min-height: 500px; /* 确保有足够的高度 */
-        visibility: visible !important; /* 确保可见 */
-        opacity: 1 !important; /* 确保不透明 */
+    /* 确保隐藏的内容真正隐藏（优先级高于通用规则） */
+    #verticalContent.separator-content[style*="display: none"],
+    #horizontalContent.separator-content[style*="display: none"],
+    #steamContent.separator-content[style*="display: none"] {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     
-    #steamContent .main-content {
-        display: flex !important; /* 移动端使用flex布局更可靠 */
+    /* 水蒸汽立式内容在移动端显示时的样式（仅在display:block时应用） */
+    #steamContent.separator-content:not([style*="display: none"]) {
+        width: 100%;
+        min-height: 500px;
+    }
+    
+    #steamContent.separator-content:not([style*="display: none"]) .main-content {
+        display: flex;
         flex-direction: column;
         gap: 20px;
         width: 100%;
     }
     
-    #steamContent .input-section,
-    #steamContent .result-section {
+    #steamContent.separator-content:not([style*="display: none"]) .input-section,
+    #steamContent.separator-content:not([style*="display: none"]) .result-section {
         width: 100%;
         flex: 1;
-        min-width: 0; /* 防止flex项目溢出 */
-    }
-    
-    /* 确保水蒸汽模块的所有子元素都可见 */
-    #steamContent * {
-        max-width: 100%;
+        min-width: 0;
     }
 }
 

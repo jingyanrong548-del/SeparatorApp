@@ -438,6 +438,7 @@ async function calculateHorizontal() {
                 'R290': 0.007,
                 'R600a': 0.006,
                 'R410A': 0.004,
+                'R744': 0.005, // 二氧化碳 (CO₂)
                 // 高温制冷剂
                 'R245fa': 0.014,
                 'R123': 0.015,
@@ -450,65 +451,144 @@ async function calculateHorizontal() {
         }
 
         // 计算防夹带速度 Vre (Re-entrainment velocity)
-        // 根据文档 Figure 04，需要计算 Rej, Rp, N 等参数
-        // 文档提到使用方程 D（不依赖几何形状，适用于高湍流情况）
+        // 根据Excel小程序逻辑修正：需要计算 dhl, Rel, Rp, N 等参数
         
-        // 计算关键参数
-        // Rej: 基于液滴的雷诺数（用于判断流态）
-        // 假设典型液滴直径 100-200 µm，使用平均 150 µm
-        const Dp_typical = 150e-6; // 150 µm 转换为 m
-        const eta_g = CoolPropModule.PropsSI('V', 'P', P_sat, 'T', T_suc_K, refrigerant);
-        const Rej = (Dp_typical * vt * rho_g) / eta_g;
+        // 1. 计算水力直径 dhl (Hydraulic diameter for liquid flow in a circular duct)
+        // 根据 Fig. 04，dhl 是液流的水力直径
+        // 对于圆形管道中的液流，根据液位高度比计算
+        const R = D_m / 2; // 半径 (m)
         
-        // Rp: 密度比参数
-        const Rp = rho_l / rho_g;
-        
-        // N: 无量纲参数，N = σ / (ρg * vt^2 * Dp)
-        const N = sigma / (rho_g * vt * vt * Dp_typical);
-        
-        // 根据文档 Figure 04，根据 Rej 值选择不同的计算公式
-        let v_max_entrainment;
-        
-        if (Rej > 1635) {
-            // 高雷诺数区域：使用方程 E（高湍流）
-            // Vre = K1 * sqrt(σ / (ρg * D))
-            const K1 = 0.5; // 经验系数
-            v_max_entrainment = K1 * Math.sqrt(sigma / (rho_g * D_m));
-        } else if (Rej >= 160 && Rej <= 1635) {
-            // 中等雷诺数区域：使用方程 D（文档推荐）
-            // Vre = K2 * sqrt(σ * (ρl - ρg) / ρg^2)
-            const K2 = 0.4; // 经验系数，根据文档调整
-            v_max_entrainment = K2 * Math.sqrt(sigma * (rho_l - rho_g) / (rho_g * rho_g));
-        } else if (Rej > 1.5) {
-            // 低雷诺数区域：使用修正公式
-            // Vre = K3 * sqrt(σ / (ρg * D)) * (1 + Rej^0.5)
-            const K3 = 0.3;
-            v_max_entrainment = K3 * Math.sqrt(sigma / (rho_g * D_m)) * (1 + Math.sqrt(Rej));
+        // 计算液流截面积和润湿周长
+        // 当液位高度为 H_liq 时，计算液流截面积
+        let dhl;
+        let A_liquid; // 液体截面积，后续计算需要用到
+        if (h_liq_ratio <= 0.5) {
+            // 液位在圆心以下或等于圆心
+            // 液流面积 = 扇形面积 - 三角形面积
+            const d_over_R = 1 - 2 * h_liq_ratio; // 液面到圆心的距离/半径
+            const theta = 2 * Math.acos(Math.max(-1, Math.min(1, d_over_R))); // 角度 (rad)
+            A_liquid = R * R * (theta - Math.sin(theta)) / 2; // 液流面积 (m²)
+            const P_wetted = R * theta; // 润湿周长 (m)
+            dhl = 4 * A_liquid / P_wetted; // 水力直径 (m)
         } else {
-            // 极低雷诺数：使用简化公式
-            // Vre = K4 * sqrt(σ * (ρl - ρg) / ρg^2) * sqrt(1 + N)
-            const K4 = 0.35;
-            v_max_entrainment = K4 * Math.sqrt(sigma * (rho_l - rho_g) / (rho_g * rho_g)) * Math.sqrt(1 + N);
+            // 液位在圆心以上
+            // 对于高液位，计算液流区域的水力直径
+            const d_over_R = 2 * h_liq_ratio - 1; // 液面到圆心的距离/半径（从上方）
+            const theta_gas = 2 * Math.acos(Math.max(-1, Math.min(1, d_over_R))); // 气相角度 (rad)
+            const A_total = Math.PI * R * R; // 总面积
+            const A_gas = R * R * (theta_gas - Math.sin(theta_gas)) / 2; // 气相面积
+            A_liquid = A_total - A_gas; // 液流面积
+            // 润湿周长 = 液面线长度 + 液面以下的圆周长
+            // 液面线长度 = 2 * R * sin(theta_gas/2)
+            const liquid_level_chord = 2 * R * Math.sin(theta_gas / 2); // 液面线长度
+            const theta_liquid = 2 * Math.PI - theta_gas; // 液流对应的角度
+            const P_wetted = R * theta_liquid + liquid_level_chord; // 液流润湿周长
+            dhl = 4 * A_liquid / P_wetted; // 水力直径 (m)
         }
         
-        // 考虑液位高度的影响（液位越高，防夹带速度越低）
-        // 根据文档，最大液位建议不超过 0.5*D，液位越高风险越大
-        const liquid_level_factor = 1.0 - 0.3 * h_liq_ratio; // 液位修正系数
-        v_max_entrainment = v_max_entrainment * liquid_level_factor;
+        // 确保 dhl 不为零或负值
+        if (dhl <= 0 || !isFinite(dhl)) {
+            // 如果计算失败，使用简化的水力直径估算
+            // 对于低液位，使用液流高度；对于高液位，使用直径
+            if (h_liq_ratio <= 0.5) {
+                dhl = D_m * h_liq_ratio; // 使用液位高度作为特征长度
+            } else {
+                dhl = D_m * (1 - h_liq_ratio); // 使用气相高度作为特征长度
+            }
+        }
         
-        // 验证计算结果的合理性
+        // 2. 获取液体动力粘度 μl (kg/m·s = Pa·s)
+        // 根据Excel中的B15 = μl
+        let eta_l;
+        try {
+            // CoolProp中动力粘度的属性代码是'V'，需要指定液相（Q=0）
+            eta_l = CoolPropModule.PropsSI('V', 'P', P_sat, 'Q', 0, refrigerant); // 液体动力粘度 (Pa·s)
+            if (!isFinite(eta_l) || eta_l <= 0) {
+                // 如果无法获取，使用经验估算值
+                eta_l = 0.0002; // 典型制冷剂液体动力粘度 (Pa·s)
+            }
+        } catch (e) {
+            eta_l = 0.0002; // 默认值
+        }
+        
+        // 3. 计算液体流速 VL (m/s)
+        // 根据Excel: B33 = VL = B4/B13/B25 = 液体质量流量/(液体密度*液体截面积)
+        // 这里使用估算的液体体积流量（如果后续有准确的输入，可以替换）
+        // liquid_flow_m3_s 已经在前面计算了
+        const VL = liquid_flow_m3_s / Math.max(A_liquid, 1e-6); // 液体流速 (m/s)
+        
+        // 4. 计算液体雷诺数 Rel (Excel中的B34)
+        // Rel = dh * VL / μl * ρl = dhl * VL * ρl / eta_l
+        const Rel = (dhl * VL * rho_l) / eta_l;
+        
+        // 5. 计算密度系数 Rp (Excel中的B35)
+        // Rp = (ρl/ρg)^0.5
+        const Rp = Math.sqrt(rho_l / rho_g);
+        
+        // 6. 计算界面粘度系数 N (Excel中的B36)
+        // N = μl * (ρl * σ * 0.001)^(-0.5) * ((ρl - ρg) * g / σ / 0.001)^0.25
+        // 注意：Excel中σ的单位是mN/m，所以需要乘以0.001转换为N/m
+        // 但在代码中sigma已经是N/m，所以需要转换为mN/m再计算，即乘以1000
+        const g = 9.81; // 重力加速度 (m/s²)
+        const sigma_mN_m = sigma * 1000; // 转换为mN/m（用于Excel公式）
+        const N = eta_l * Math.pow(rho_l * sigma_mN_m * 0.001, -0.5) * 
+                  Math.pow(((rho_l - rho_g) * g) / (sigma_mN_m * 0.001), 0.25);
+        
+        // 7. 根据Excel逻辑计算Vre（5个互斥条件，选择一个公式）
+        // 注意：Excel中σ的单位是mN/m，所以公式中需要乘以0.001转换为N/m
+        const sigma_factor = sigma_mN_m * 0.001; // σ在公式中使用时转换为N/m
+        let v_max_entrainment;
+        let condition_used = '';
+        
+        // 根据Excel的条件判断逻辑（互斥的if-else）
+        if (Rel < 160) {
+            // 条件A (Excel B37): IF(Rel<160, 1.5*(σ*0.001/μl)*Rp*Rel^-0.5, 0)
+            condition_used = 'A';
+            v_max_entrainment = 1.5 * (sigma_factor / eta_l) * Rp * Math.pow(Rel, -0.5);
+        } else if (Rel >= 160 && Rel <= 1635) {
+            if (N <= 0.0667) {
+                // 条件C (Excel B38): IF(AND(Rel>=160, Rel<=1635, N<=0.0667), 11.78*(σ*0.001/μl)*Rp*N^0.8*Rel^-0.33333, 0)
+                condition_used = 'C';
+                v_max_entrainment = 11.78 * (sigma_factor / eta_l) * Rp * Math.pow(N, 0.8) * Math.pow(Rel, -0.33333);
+            } else {
+                // 条件B (Excel B39): IF(AND(Rel>=160, Rel<=1635, N>0.0667), 1.35*(σ*0.001/μl)*Rp*Rel^-0.33333, 0)
+                condition_used = 'B';
+                v_max_entrainment = 1.35 * (sigma_factor / eta_l) * Rp * Math.pow(Rel, -0.33333);
+            }
+        } else if (Rel > 1635) {
+            if (N <= 0.0667) {
+                // 条件D (Excel B40): IF(AND(Rel>1635, N<=0.0667), (σ*0.001/μl)*Rp*N^0.8, 0)
+                condition_used = 'D';
+                v_max_entrainment = (sigma_factor / eta_l) * Rp * Math.pow(N, 0.8);
+            } else {
+                // 条件E (Excel B41): IF(AND(Rel>1635, N>0.0667), 0.1146*(σ*0.001/μl)*Rp, 0)
+                condition_used = 'E';
+                v_max_entrainment = 0.1146 * (sigma_factor / eta_l) * Rp;
+            }
+        } else {
+            // 默认情况（理论上不应该到达这里）
+            condition_used = 'A';
+            v_max_entrainment = 1.5 * (sigma_factor / eta_l) * Rp * Math.pow(Math.max(Rel, 0.1), -0.5);
+        }
+        
+        // 8. 验证计算结果的合理性
         if (!isFinite(v_max_entrainment) || v_max_entrainment <= 0) {
-            // 后备公式：基于密度比和终端速度的经验公式
-            v_max_entrainment = 0.15 * Math.sqrt(rho_l / rho_g) * vt;
+            // 后备公式：使用方程 D（几何无关，文档推荐）
+            v_max_entrainment = 8.2 * Math.sqrt(sigma * (rho_l - rho_g) / (rho_g * rho_g));
         }
         
-        // 确保防夹带速度至少是终端速度的合理倍数（通常为 2-10 倍）
-        const min_vre_ratio = 2.0;
-        const max_vre_ratio = 15.0;
+        // 9. 确保防夹带速度在合理范围内
+        // 通常 Vre 应该远大于 vt（至少 2-10 倍）
+        // 但不要设置硬性限制，因为实际值可能因条件而异
+        const min_vre_ratio = 1.5; // 最小比值（降低限制，允许更灵活的计算）
+        const max_vre_ratio = 20.0; // 最大比值
         if (v_max_entrainment < vt * min_vre_ratio) {
-            v_max_entrainment = vt * min_vre_ratio;
+            // 如果计算值过小，给出警告但使用计算值
+            console.warn(`警告: 防夹带速度 ${v_max_entrainment.toFixed(3)} m/s 接近终端速度 ${vt.toFixed(3)} m/s，可能存在计算问题`);
         } else if (v_max_entrainment > vt * max_vre_ratio) {
+            // 如果计算值过大，限制在合理范围内
             v_max_entrainment = vt * max_vre_ratio;
+            console.warn(`警告: 防夹带速度计算结果过大，已限制为 ${v_max_entrainment.toFixed(3)} m/s`);
         }
         
         // 计算实际水平气速（基于当前结构参数）
@@ -2219,6 +2299,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const verticalContent = document.getElementById('verticalContent');
     const horizontalContent = document.getElementById('horizontalContent');
     const steamContent = document.getElementById('steamContent');
+    
+    // 设置初始显示状态（确保只有制冷立式显示）
+    if (verticalContent) {
+        verticalContent.style.display = 'block';
+        verticalContent.style.visibility = 'visible';
+    }
+    if (horizontalContent) {
+        horizontalContent.style.display = 'none';
+        horizontalContent.style.visibility = 'hidden';
+    }
+    if (steamContent) {
+        steamContent.style.display = 'none';
+        steamContent.style.visibility = 'hidden';
+    }
 
     verticalBtn.addEventListener('click', () => {
         verticalBtn.classList.add('active');
@@ -2230,9 +2324,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (horizontalContent) {
             horizontalContent.style.display = 'none';
+            horizontalContent.style.visibility = 'hidden';
         }
         if (steamContent) {
             steamContent.style.display = 'none';
+            steamContent.style.visibility = 'hidden';
         }
     });
 
@@ -2246,9 +2342,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (verticalContent) {
             verticalContent.style.display = 'none';
+            verticalContent.style.visibility = 'hidden';
         }
         if (steamContent) {
             steamContent.style.display = 'none';
+            steamContent.style.visibility = 'hidden';
         }
     });
 
@@ -2258,13 +2356,15 @@ document.addEventListener('DOMContentLoaded', () => {
         horizontalBtn.classList.remove('active');
         if (steamContent) {
             steamContent.style.display = 'block';
-            steamContent.style.visibility = 'visible'; /* 确保可见 */
+            steamContent.style.visibility = 'visible';
         }
         if (verticalContent) {
             verticalContent.style.display = 'none';
+            verticalContent.style.visibility = 'hidden';
         }
         if (horizontalContent) {
             horizontalContent.style.display = 'none';
+            horizontalContent.style.visibility = 'hidden';
         }
     });
 
