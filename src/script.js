@@ -2848,16 +2848,826 @@ function updateSteamDiagram(diameter_mm, height_mm, inletDryness, liquidRatio) {
     }
 }
 
+// Surge Drum 校验计算函数
+// 计算卧式容器中液体的滞留时间
+async function calculateHorizontalSurgeTime(inputs) {
+    try {
+        // 检查 CoolProp 是否已初始化
+        if (!CoolPropModule) {
+            await initCoolProp();
+        }
+
+        // 1. 单位转换：将所有输入转换为 SI 标准单位
+        const D_m = inputs.D_mm / 1000;              // mm -> m
+        const L_m = inputs.L_mm / 1000;              // mm -> m
+        const level_ratio = inputs.level_percent / 100;  // 百分比 -> 小数
+        // 对于 Surge Drum，蒸发温度即为饱和温度
+        const T_sat_c = inputs.Te_C || inputs.T_sat_c;  // 优先使用蒸发温度
+        const T_sat_K = T_sat_c + 273.15;     // °C -> K
+        
+        // 计算总质量流量（如果提供了制冷量，则从制冷量计算）
+        let m_dot_total_kg_s;
+        if (inputs.calcMode === 'cooling-capacity' && inputs.Q_kW) {
+            // 从制冷量计算质量流量
+            const Te_K = inputs.Te_C + 273.15;
+            const deltaT_sh_calc = inputs.deltaT_sh === 0 ? 0.001 : inputs.deltaT_sh;
+            const T_suc_K = Te_K + deltaT_sh_calc;
+            
+            // 获取饱和压力
+            const P_sat = CoolPropModule.PropsSI('P', 'T', Te_K, 'Q', 1, inputs.refrigerant);
+            
+            // 计算吸气状态下的气体焓值
+            const h_gas = CoolPropModule.PropsSI('H', 'P', P_sat, 'T', T_suc_K, inputs.refrigerant);
+            
+            // 计算饱和液体的焓值
+            const h_liq = CoolPropModule.PropsSI('H', 'P', P_sat, 'Q', 0, inputs.refrigerant);
+            
+            // 计算焓差 (J/kg)
+            const delta_h = h_gas - h_liq;
+            if (delta_h <= 0 || !isFinite(delta_h)) {
+                throw new Error('焓差计算异常，请检查过热度设置');
+            }
+            
+            // 计算质量流量 (kg/s) = (Q_kW * 1000) / delta_h
+            m_dot_total_kg_s = (inputs.Q_kW * 1000) / delta_h;
+        } else {
+            // 直接使用输入的质量流量
+            m_dot_total_kg_s = inputs.m_dot_total_kgh / 3600;  // kg/h -> kg/s
+        }
+
+        // 2. 物性调用：获取饱和液体和气体密度
+        let rho_liq, rho_gas;
+        try {
+            // 先获取饱和压力
+            const P_sat = CoolPropModule.PropsSI('P', 'T', T_sat_K, 'Q', 1, inputs.refrigerant);
+            // 获取饱和液体密度 (Q=0 表示饱和液体)
+            rho_liq = CoolPropModule.PropsSI('D', 'P', P_sat, 'Q', 0, inputs.refrigerant);
+            // 获取饱和气体密度 (Q=1 表示饱和蒸汽)
+            rho_gas = CoolPropModule.PropsSI('D', 'P', P_sat, 'Q', 1, inputs.refrigerant);
+        } catch (error) {
+            throw new Error(`物性计算失败: ${error.message}。请检查制冷剂类型和饱和温度是否在有效范围内。`);
+        }
+
+        // 3. 计算沉降速度 vt (使用 Souders-Brown 公式)
+        const Ks = inputs.Ks || 0.07;
+        const vt = Ks * Math.sqrt((rho_liq - rho_gas) / rho_gas);
+        if (vt <= 0 || !isFinite(vt)) {
+            throw new Error('无法计算沉降速度，请检查 Ks 值和物性参数');
+        }
+
+        // 4. 计算液体流量
+        // 液相质量流量 (kg/s) = 总流量 * (1 - 干度)
+        const m_dot_liq_kg_s = m_dot_total_kg_s * (1 - inputs.x_in);
+        
+        // 气相质量流量 (kg/s) = 总流量 * 干度
+        const m_dot_gas_kg_s = m_dot_total_kg_s * inputs.x_in;
+        
+        // 液相体积流量 (m³/s) = 液相质量流量 / 液体密度
+        const q_liq = m_dot_liq_kg_s / rho_liq;
+        
+        // 气相体积流量 (m³/s) = 气相质量流量 / 气体密度
+        const q_gas = m_dot_gas_kg_s / rho_gas;
+
+        // 5. 计算水平气速和所需长度（基于分离要求）
+        // 注意：D_m 和 level_ratio 已在函数开头声明，这里直接使用
+        
+        // 计算气相流通面积
+        const R = D_m / 2;  // 半径
+        const H = D_m * level_ratio;  // 液位高度（从底部到液面的高度）
+        
+        // 计算液体弓形面积（用于计算气相面积）
+        const d = R - H;
+        const d_over_R = Math.max(-1, Math.min(1, d / R));
+        const theta_half = Math.acos(d_over_R);
+        let A_liq_segment;
+        if (H <= R) {
+            // 液位在中心线以下：计算下方弓形面积
+            A_liq_segment = R * R * theta_half - (R - H) * Math.sqrt(2 * R * H - H * H);
+        } else {
+            // 液位在中心线以上：计算上方弓形面积
+            const H_bottom = 2 * R - H;
+            const d_bottom = R - H_bottom;
+            const d_bottom_over_R = Math.max(-1, Math.min(1, d_bottom / R));
+            const theta_bottom_half = Math.acos(d_bottom_over_R);
+            const A_bottom = R * R * theta_bottom_half - (R - H_bottom) * Math.sqrt(2 * R * H_bottom - H_bottom * H_bottom);
+            A_liq_segment = Math.PI * R * R - A_bottom;
+        }
+        
+        const A_total = Math.PI * R * R;  // 总面积
+        const A_gas = A_total - A_liq_segment;  // 气相流通面积
+        
+        // 计算水平气速 vh = 气相体积流量 / 气相流通面积
+        const vh = q_gas / A_gas;
+        
+        // 5.1 计算防夹带速度 Vre (Re-entrainment velocity)
+        // 获取表面张力 (N/m)
+        let sigma;
+        try {
+            const P_sat = CoolPropModule.PropsSI('P', 'T', T_sat_K, 'Q', 1, inputs.refrigerant);
+            sigma = CoolPropModule.PropsSI('I', 'P', P_sat, 'Q', 0, inputs.refrigerant); // 表面张力
+            if (!isFinite(sigma) || sigma <= 0) {
+                // 如果无法获取，使用经验估算值
+                sigma = 0.01; // 典型制冷剂表面张力 (N/m)
+            }
+        } catch (e) {
+            sigma = 0.01; // 默认值
+        }
+        
+        // 获取液体动力粘度 μl (kg/m·s = Pa·s)
+        let eta_l;
+        try {
+            const P_sat = CoolPropModule.PropsSI('P', 'T', T_sat_K, 'Q', 1, inputs.refrigerant);
+            eta_l = CoolPropModule.PropsSI('V', 'P', P_sat, 'Q', 0, inputs.refrigerant); // 液体动力粘度 (Pa·s)
+            if (!isFinite(eta_l) || eta_l <= 0) {
+                eta_l = 0.0002; // 典型制冷剂液体动力粘度 (Pa·s)
+            }
+        } catch (e) {
+            eta_l = 0.0002; // 默认值
+        }
+        
+        // 计算水力直径 dhl (Hydraulic diameter for liquid flow)
+        const h_liq_ratio = level_ratio; // 液位高度比
+        let dhl;
+        let A_liquid; // 液体截面积
+        if (h_liq_ratio <= 0.5) {
+            // 液位在圆心以下或等于圆心
+            const d_over_R = 1 - 2 * h_liq_ratio;
+            const theta = 2 * Math.acos(Math.max(-1, Math.min(1, d_over_R)));
+            A_liquid = R * R * (theta - Math.sin(theta)) / 2;
+            const P_wetted = R * theta;
+            dhl = 4 * A_liquid / P_wetted;
+        } else {
+            // 液位在圆心以上
+            const d_over_R = 2 * h_liq_ratio - 1;
+            const theta_gas = 2 * Math.acos(Math.max(-1, Math.min(1, d_over_R)));
+            const A_total_calc = Math.PI * R * R;
+            const A_gas_calc = R * R * (theta_gas - Math.sin(theta_gas)) / 2;
+            A_liquid = A_total_calc - A_gas_calc;
+            const liquid_level_chord = 2 * R * Math.sin(theta_gas / 2);
+            const theta_liquid = 2 * Math.PI - theta_gas;
+            const P_wetted = R * theta_liquid + liquid_level_chord;
+            dhl = 4 * A_liquid / P_wetted;
+        }
+        
+        // 确保 dhl 不为零或负值
+        if (dhl <= 0 || !isFinite(dhl)) {
+            if (h_liq_ratio <= 0.5) {
+                dhl = D_m * h_liq_ratio;
+            } else {
+                dhl = D_m * (1 - h_liq_ratio);
+            }
+        }
+        
+        // 计算液体流速 VL (m/s)
+        const VL = q_liq / Math.max(A_liquid, 1e-6);
+        
+        // 计算液体雷诺数 Rel
+        const Rel = (dhl * VL * rho_liq) / eta_l;
+        
+        // 计算密度系数 Rp
+        const Rp = Math.sqrt(rho_liq / rho_gas);
+        
+        // 计算界面粘度系数 N
+        const g = 9.81; // 重力加速度 (m/s²)
+        const sigma_mN_m = sigma * 1000; // 转换为mN/m
+        const N = eta_l * Math.pow(rho_liq * sigma_mN_m * 0.001, -0.5) * 
+                  Math.pow(((rho_liq - rho_gas) * g) / (sigma_mN_m * 0.001), 0.25);
+        
+        // 根据Excel逻辑计算Vre（5个互斥条件）
+        const sigma_factor = sigma_mN_m * 0.001; // σ在公式中使用时转换为N/m
+        let v_max_entrainment;
+        let condition_used = '';
+        
+        if (Rel < 160) {
+            condition_used = 'A';
+            v_max_entrainment = 1.5 * (sigma_factor / eta_l) * Rp * Math.pow(Rel, -0.5);
+        } else if (Rel >= 160 && Rel <= 1635) {
+            if (N <= 0.0667) {
+                condition_used = 'C';
+                v_max_entrainment = 11.78 * (sigma_factor / eta_l) * Rp * Math.pow(N, 0.8) * Math.pow(Rel, -0.33333);
+            } else {
+                condition_used = 'B';
+                v_max_entrainment = 1.35 * (sigma_factor / eta_l) * Rp * Math.pow(Rel, -0.33333);
+            }
+        } else if (Rel > 1635) {
+            if (N <= 0.0667) {
+                condition_used = 'D';
+                v_max_entrainment = (sigma_factor / eta_l) * Rp * Math.pow(N, 0.8);
+            } else {
+                condition_used = 'E';
+                v_max_entrainment = 0.1146 * (sigma_factor / eta_l) * Rp;
+            }
+        } else {
+            condition_used = 'A';
+            v_max_entrainment = 1.5 * (sigma_factor / eta_l) * Rp * Math.pow(Math.max(Rel, 0.1), -0.5);
+        }
+        
+        // 验证计算结果的合理性
+        if (!isFinite(v_max_entrainment) || v_max_entrainment <= 0) {
+            // 后备公式
+            v_max_entrainment = 8.2 * Math.sqrt(sigma * (rho_liq - rho_gas) / (rho_gas * rho_gas));
+        }
+        
+        // 确保防夹带速度在合理范围内
+        const min_vre_ratio = 1.5;
+        const max_vre_ratio = 20.0;
+        if (v_max_entrainment < vt * min_vre_ratio) {
+            console.warn(`警告: 防夹带速度 ${v_max_entrainment.toFixed(3)} m/s 接近终端速度 ${vt.toFixed(3)} m/s，可能存在计算问题`);
+        } else if (v_max_entrainment > vt * max_vre_ratio) {
+            v_max_entrainment = vt * max_vre_ratio;
+            console.warn(`警告: 防夹带速度计算结果过大，已限制为 ${v_max_entrainment.toFixed(3)} m/s`);
+        }
+        
+        // 计算防夹带速度比值
+        const velocityRatio_re = vh / v_max_entrainment;
+        const isSafeVelocity = vh < v_max_entrainment;
+        
+        // 计算气相高度（从液面到容器顶部）
+        const H_gas = D_m - H;  // 气相高度
+        const S_l = H_gas;  // 沉降距离 = 气相高度
+        
+        // 计算所需最小长度（满足分离时间要求）
+        // L_min = (S_l / vt) * vh * 安全系数
+        const safetyFactor = 1.1;  // 10% 安全余量
+        const L_min = (S_l / vt) * vh * safetyFactor;
+        const L_min_mm = L_min * 1000;  // 转换为 mm
+        
+        // 确保最小长度至少为直径的 2 倍
+        const L_min_final = Math.max(L_min, D_m * 2.0);
+        const L_min_final_mm = L_min_final * 1000;
+        
+        // 校核输入长度是否满足要求
+        const L_ratio = L_m / L_min_final;  // 实际长度与最小长度的比值
+        const meetsLengthRequirement = L_m >= L_min_final;
+        
+        // 如果输入长度不满足要求，给出警告
+        if (!meetsLengthRequirement) {
+            console.warn(`警告: 输入长度 ${(L_m * 1000).toFixed(0)} mm 小于最小长度要求 ${L_min_final_mm.toFixed(0)} mm，可能影响分离效果`);
+        }
+        
+        // 如果长度过长（L/D > 6），给出警告
+        if (L_m / D_m > 6.0) {
+            console.warn(`警告: 输入长度 ${(L_m * 1000).toFixed(0)} mm 过长（L/D = ${(L_m / D_m).toFixed(2)}），建议增大直径`);
+        }
+
+        // 6. 计算出口干度（考虑丝网分离效率）
+        let x_out = inputs.x_in; // 默认出口干度等于入口干度
+        let separatedLiquidMass = 0; // 被分离的液体质量流量 (kg/s)
+        
+        if (inputs.useMesh && inputs.meshConfig) {
+            // 如果安装了丝网除沫器，根据分离效率计算出口干度
+            const meshEfficiency = inputs.meshConfig.efficiency / 100; // 转换为小数
+            
+            // 更合理的计算方法：
+            // 丝网除沫器的作用是分离气相中夹带的液滴，提高出口干度
+            // 假设理想情况下，丝网可以将出口干度提升到接近1.0
+            // 实际提升效果 = (1 - x_in) * meshEfficiency * effectivenessFactor
+            // effectivenessFactor 考虑实际工况、丝网规格等因素的影响
+            
+            // 有效性系数：考虑实际工况对分离效果的影响
+            // 影响因素：丝网目数、厚度、气速、液滴大小等
+            // 这里使用一个经验值，可以根据丝网规格调整
+            let effectivenessFactor = 0.85; // 默认85%的有效性
+            
+            // 根据丝网目数调整有效性系数（目数越高，效果越好）
+            const meshCount = inputs.meshConfig.mesh || 80;
+            if (meshCount >= 100) {
+                effectivenessFactor = 0.95; // 100目及以上，95%有效性
+            } else if (meshCount >= 80) {
+                effectivenessFactor = 0.90; // 80目，90%有效性
+            } else if (meshCount >= 60) {
+                effectivenessFactor = 0.85; // 60目，85%有效性
+            } else {
+                effectivenessFactor = 0.75; // 60目以下，75%有效性
+            }
+            
+            // 计算出口干度提升
+            // x_out = x_in + (1 - x_in) * meshEfficiency * effectivenessFactor
+            // 这表示：丝网可以将"非干部分"（1 - x_in）中的一部分转换为干蒸汽
+            const drynessImprovement = (1 - inputs.x_in) * meshEfficiency * effectivenessFactor;
+            x_out = inputs.x_in + drynessImprovement;
+            x_out = Math.max(inputs.x_in, Math.min(1.0, x_out)); // 限制范围：不低于入口干度，不高于1.0
+            
+            // 计算被分离的液体质量流量（用于显示）
+            // 分离出的液体 = 总质量流量 * 干度提升
+            separatedLiquidMass = m_dot_total_kg_s * drynessImprovement;
+            
+        } else {
+            // 没有丝网时，假设出口干度等于入口干度（理想情况）
+            // 实际可能会有少量液滴夹带，但这里简化处理
+            x_out = inputs.x_in;
+            separatedLiquidMass = 0;
+        }
+
+        // 7. 计算卧式容器内液体的实际体积（核心几何计算）
+        // 注意：这里使用上面已经计算好的 A_liq_segment
+        // 确保面积非负
+        if (A_liq_segment < 0 || !isFinite(A_liq_segment)) {
+            throw new Error('液体体积计算失败，请检查输入的几何参数和液位百分比');
+        }
+
+        // 计算液体体积 (m³)
+        const V_liq = L_m * A_liq_segment;
+
+        // 7.1 计算接管管径
+        // 总体积流量（用于入口管计算）
+        const q_total = q_liq + q_gas; // 总体积流量 (m³/s)
+        
+        // 入口管管径（带液气体入口）
+        // D = sqrt(4 * Q / (π * v * n))
+        const inletDiameter_m = Math.sqrt((4 * q_total) / (Math.PI * inputs.inletVelocity * inputs.inletCount));
+        const inletDiameter_mm = inletDiameter_m * 1000;
+        
+        // 下液管管径
+        const liquidDiameter_m = Math.sqrt((4 * q_liq) / (Math.PI * inputs.liquidVelocity * inputs.liquidCount));
+        const liquidDiameter_mm = liquidDiameter_m * 1000;
+        
+        // 出气管管径
+        const outletDiameter_m = Math.sqrt((4 * q_gas) / (Math.PI * inputs.outletVelocity * inputs.outletCount));
+        const outletDiameter_mm = outletDiameter_m * 1000;
+
+        // 8. 计算滞留时间
+        if (q_liq <= 0) {
+            throw new Error('液相体积流量必须大于 0。请检查入口干度和总流量。');
+        }
+        
+        const surgeTime_s = V_liq / q_liq;  // 滞留时间 (秒)
+        const surgeTime_min = surgeTime_s / 60;  // 转换为分钟
+
+        // 9. 关键数据合理性评估
+        const L_D_ratio = L_m / D_m;  // 长径比
+        const liquidVolumeRatio = V_liq / (Math.PI * R * R * L_m);  // 液体体积占容器总容积的比例
+        
+        // 评估各项关键数据
+        const evaluations = [];
+        const suggestions = [];
+        
+        // 评估滞留时间（仅作为参考，不影响主要评判）
+        let surgeTimeAdvice = "";  // 仅作为参考建议
+        
+        if (surgeTime_min < 3.0) {
+            surgeTimeAdvice = "参考：滞留时间较短（< 3 分钟），建议关注泵的抽空风险。";
+            evaluations.push({
+                item: "滞留时间（参考）",
+                value: `${formatNumber(surgeTime_min, 2)} 分钟`,
+                status: "较短",
+                statusClass: "status-info",  // 改为 info，不作为主要评判
+                description: "滞留时间 < 3 分钟，建议关注"
+            });
+        } else if (surgeTime_min >= 3.0 && surgeTime_min < 5.0) {
+            surgeTimeAdvice = "参考：滞留时间适中（3-5 分钟）。";
+            evaluations.push({
+                item: "滞留时间（参考）",
+                value: `${formatNumber(surgeTime_min, 2)} 分钟`,
+                status: "适中",
+                statusClass: "status-info",
+                description: "滞留时间 3-5 分钟"
+            });
+        } else if (surgeTime_min >= 5.0 && surgeTime_min <= 15.0) {
+            surgeTimeAdvice = "参考：滞留时间在推荐范围内 (5-15分钟)。";
+            evaluations.push({
+                item: "滞留时间（参考）",
+                value: `${formatNumber(surgeTime_min, 2)} 分钟`,
+                status: "合理",
+                statusClass: "status-info",
+                description: "滞留时间在推荐范围内"
+            });
+        } else if (surgeTime_min > 15.0) {
+            surgeTimeAdvice = "参考：滞留时间非常充裕（> 15 分钟）。";
+            evaluations.push({
+                item: "滞留时间（参考）",
+                value: `${formatNumber(surgeTime_min, 2)} 分钟`,
+                status: "充足",
+                statusClass: "status-info",
+                description: "滞留时间 > 15 分钟，缓冲能力强"
+            });
+        }
+        
+        // 主要评判条件改为基于分离效果
+        let overallStatusClass = "status-ok";  // 默认合格
+        
+        // 评估长度校核（是否满足最小长度要求）
+        if (!meetsLengthRequirement) {
+            if (L_ratio < 0.8) {
+                overallStatusClass = "status-danger";  // 严重不足
+            } else {
+                overallStatusClass = "status-warning";  // 不足
+            }
+            evaluations.push({
+                item: "长度校核",
+                value: `${formatNumber(L_m * 1000, 0)} mm (最小要求: ${formatNumber(L_min_final_mm, 0)} mm)`,
+                status: "不满足",
+                statusClass: overallStatusClass,
+                description: `⚠️ 输入长度 ${formatNumber(L_m * 1000, 0)} mm 小于最小长度要求 ${formatNumber(L_min_final_mm, 0)} mm，可能影响分离效果`
+            });
+            suggestions.push(`建议将长度增加至 ${formatNumber(L_min_final_mm, 0)} mm 以上以满足分离要求`);
+            suggestions.push(`或增大直径以降低水平气速，从而减少最小长度要求`);
+        } else if (L_ratio >= 1.0 && L_ratio <= 1.2) {
+            evaluations.push({
+                item: "长度校核",
+                value: `${formatNumber(L_m * 1000, 0)} mm (最小要求: ${formatNumber(L_min_final_mm, 0)} mm)`,
+                status: "满足",
+                statusClass: "status-ok",
+                description: `✓ 输入长度满足最小长度要求，余量 ${formatNumber((L_ratio - 1) * 100, 1)}%`
+            });
+        } else {
+            evaluations.push({
+                item: "长度校核",
+                value: `${formatNumber(L_m * 1000, 0)} mm (最小要求: ${formatNumber(L_min_final_mm, 0)} mm)`,
+                status: "充足",
+                statusClass: "status-info",
+                description: `输入长度充足，余量 ${formatNumber((L_ratio - 1) * 100, 1)}%`
+            });
+        }
+        
+        // 评估水平气速（如果过高，可能影响分离效果）
+        if (vh > vt * 5) {
+            if (overallStatusClass === "status-ok") {
+                overallStatusClass = "status-warning";
+            }
+            evaluations.push({
+                item: "水平气速 vh",
+                value: `${formatNumber(vh, 3)} m/s`,
+                status: "偏高",
+                statusClass: "status-warning",
+                description: "水平气速过高（> 5×vt），可能影响分离效果"
+            });
+            suggestions.push("建议增大直径以降低水平气速");
+        } else if (vh > 0 && vh <= vt * 5) {
+            evaluations.push({
+                item: "水平气速 vh",
+                value: `${formatNumber(vh, 3)} m/s`,
+                status: "合理",
+                statusClass: "status-ok",
+                description: "水平气速在合理范围内"
+            });
+        }
+        
+        // 评估防夹带速度（最重要）
+        if (velocityRatio_re >= 1.0) {
+            overallStatusClass = "status-danger";
+            evaluations.push({
+                item: "防夹带速度比值 (vh/Vre)",
+                value: formatNumber(velocityRatio_re, 3),
+                status: "危险",
+                statusClass: "status-danger",
+                description: "⚠️ 危险：水平气速超过防夹带速度，会发生液滴夹带"
+            });
+            suggestions.push("必须增大直径以降低水平气速，确保 vh < Vre");
+        } else if (velocityRatio_re >= 0.9) {
+            if (overallStatusClass === "status-ok") {
+                overallStatusClass = "status-warning";
+            }
+            evaluations.push({
+                item: "防夹带速度比值 (vh/Vre)",
+                value: formatNumber(velocityRatio_re, 3),
+                status: "接近危险",
+                statusClass: "status-warning",
+                description: "⚠️ 警告：水平气速接近防夹带速度，存在夹带风险"
+            });
+            suggestions.push("建议增大直径以降低水平气速，确保 vh/Vre < 0.8");
+        } else if (velocityRatio_re >= 0.8) {
+            if (overallStatusClass === "status-ok") {
+                overallStatusClass = "status-warning";
+            }
+            evaluations.push({
+                item: "防夹带速度比值 (vh/Vre)",
+                value: formatNumber(velocityRatio_re, 3),
+                status: "偏高",
+                statusClass: "status-warning",
+                description: "注意：水平气速偏高，建议控制在 0.8 以下"
+            });
+            suggestions.push("建议增大直径以降低水平气速，确保 vh/Vre < 0.8");
+        } else if (velocityRatio_re >= 0.6) {
+            evaluations.push({
+                item: "防夹带速度比值 (vh/Vre)",
+                value: formatNumber(velocityRatio_re, 3),
+                status: "合理",
+                statusClass: "status-ok",
+                description: "✓ 水平气速在安全范围内"
+            });
+        } else {
+            evaluations.push({
+                item: "防夹带速度比值 (vh/Vre)",
+                value: formatNumber(velocityRatio_re, 3),
+                status: "优秀",
+                statusClass: "status-ok",
+                description: "✓ 水平气速安全，有充足余量"
+            });
+        }
+        
+        // 评估长径比
+        if (L_D_ratio < 2.0) {
+            evaluations.push({
+                item: "长径比 L/D",
+                value: formatNumber(L_D_ratio, 2),
+                status: "偏低",
+                statusClass: "status-warning",
+                description: "长径比 < 2.0，可能影响分离效果"
+            });
+            suggestions.push("建议长径比在 2.0 - 6.0 之间，当前值偏低");
+        } else if (L_D_ratio > 6.0) {
+            evaluations.push({
+                item: "长径比 L/D",
+                value: formatNumber(L_D_ratio, 2),
+                status: "偏高",
+                statusClass: "status-info",
+                description: "长径比 > 6.0，容器较长"
+            });
+            suggestions.push("长径比偏高，可考虑增加直径以减少长度");
+        } else {
+            evaluations.push({
+                item: "长径比 L/D",
+                value: formatNumber(L_D_ratio, 2),
+                status: "合理",
+                statusClass: "status-ok",
+                description: "长径比在推荐范围内 (2.0-6.0)"
+            });
+        }
+        
+        // 评估液位高度
+        if (level_ratio < 0.1) {
+            evaluations.push({
+                item: "液位高度比",
+                value: `${formatNumber(level_ratio * 100, 1)}%`,
+                status: "过低",
+                statusClass: "status-danger",
+                description: "液位 < 10%，液体体积过小"
+            });
+            suggestions.push("液位过低，建议提高至 20-40%");
+        } else if (level_ratio > 0.5) {
+            evaluations.push({
+                item: "液位高度比",
+                value: `${formatNumber(level_ratio * 100, 1)}%`,
+                status: "偏高",
+                statusClass: "status-warning",
+                description: "液位 > 50%，可能影响气相分离空间"
+            });
+            suggestions.push("液位偏高，建议控制在 50% 以下以保证分离效果");
+        } else {
+            evaluations.push({
+                item: "液位高度比",
+                value: `${formatNumber(level_ratio * 100, 1)}%`,
+                status: "合理",
+                statusClass: "status-ok",
+                description: "液位在推荐范围内 (10-50%)"
+            });
+        }
+        
+        // 评估液体体积占比
+        if (liquidVolumeRatio < 0.1) {
+            evaluations.push({
+                item: "液体体积占比",
+                value: `${formatNumber(liquidVolumeRatio * 100, 1)}%`,
+                status: "偏低",
+                statusClass: "status-warning",
+                description: "液体体积占比 < 10%，容器利用率低"
+            });
+        } else if (liquidVolumeRatio > 0.5) {
+            evaluations.push({
+                item: "液体体积占比",
+                value: `${formatNumber(liquidVolumeRatio * 100, 1)}%`,
+                status: "偏高",
+                statusClass: "status-warning",
+                description: "液体体积占比 > 50%，气相空间不足"
+            });
+            suggestions.push("液体体积占比偏高，可能影响气相分离，建议降低液位或增大容器");
+        } else {
+            evaluations.push({
+                item: "液体体积占比",
+                value: `${formatNumber(liquidVolumeRatio * 100, 1)}%`,
+                status: "合理",
+                statusClass: "status-ok",
+                description: "液体体积占比在合理范围内"
+            });
+        }
+        
+        // 评估液相流量
+        const m_dot_liq_kg_h = m_dot_liq_kg_s * 3600;
+        if (m_dot_liq_kg_h < 100) {
+            evaluations.push({
+                item: "液相质量流量",
+                value: `${formatNumber(m_dot_liq_kg_h, 1)} kg/h`,
+                status: "偏低",
+                statusClass: "status-info",
+                description: "液相流量较小，系统负荷较低"
+            });
+        } else if (m_dot_liq_kg_h > 50000) {
+            evaluations.push({
+                item: "液相质量流量",
+                value: `${formatNumber(m_dot_liq_kg_h, 1)} kg/h`,
+                status: "偏高",
+                statusClass: "status-warning",
+                description: "液相流量很大，需确保容器尺寸足够"
+            });
+        } else {
+            evaluations.push({
+                item: "液相质量流量",
+                value: `${formatNumber(m_dot_liq_kg_h, 1)} kg/h`,
+                status: "正常",
+                statusClass: "status-ok",
+                description: "液相流量在正常范围内"
+            });
+        }
+        
+        // 评估沉降速度
+        if (vt < 0.01) {
+            evaluations.push({
+                item: "沉降速度 vt",
+                value: `${formatNumber(vt, 4)} m/s`,
+                status: "偏低",
+                statusClass: "status-warning",
+                description: "沉降速度较低，可能影响液滴分离效果"
+            });
+        } else if (vt >= 0.01 && vt <= 0.5) {
+            evaluations.push({
+                item: "沉降速度 vt",
+                value: `${formatNumber(vt, 4)} m/s`,
+                status: "合理",
+                statusClass: "status-ok",
+                description: "沉降速度在合理范围内"
+            });
+        } else {
+            evaluations.push({
+                item: "沉降速度 vt",
+                value: `${formatNumber(vt, 4)} m/s`,
+                status: "较高",
+                statusClass: "status-info",
+                description: "沉降速度较高，分离效果较好"
+            });
+        }
+
+        // 评估出口干度（与要求值比较）
+        const x_out_display = x_out;
+        const x_out_required = inputs.x_out_required || 0.95;  // 出口干度要求
+        const drynessImprovement = (x_out_display - inputs.x_in) * 100;
+        const drynessGap = (x_out_required - x_out_display) * 100;  // 与要求的差距（百分比）
+        
+        // 判断是否满足要求
+        const meetsRequirement = x_out_display >= x_out_required;
+        
+        if (!meetsRequirement) {
+            // 未达到要求，报警
+            if (drynessGap > 5) {
+                overallStatusClass = "status-danger";  // 差距大于5%，严重警告
+            } else {
+                overallStatusClass = "status-warning";  // 差距较小，警告
+            }
+            
+            evaluations.push({
+                item: "出口干度 x_out",
+                value: `${formatNumber(x_out_display, 3)} (要求: ${formatNumber(x_out_required, 3)})`,
+                status: "未达标",
+                statusClass: overallStatusClass,
+                description: `⚠️ 报警：实际出口干度 ${formatNumber(x_out_display, 3)} 低于要求值 ${formatNumber(x_out_required, 3)}，差距 ${formatNumber(drynessGap, 2)}%`
+            });
+            
+            suggestions.push(`⚠️ 出口干度未达标！实际值 ${formatNumber(x_out_display, 3)} < 要求值 ${formatNumber(x_out_required, 3)}`);
+            
+            if (!inputs.useMesh || !inputs.meshConfig) {
+                suggestions.push("建议安装不锈钢丝网除沫器以提高出口干度");
+            } else {
+                suggestions.push("建议提高丝网除沫器的分离效率或更换更高规格的丝网");
+                suggestions.push("建议增大容器直径或长度以改善分离效果");
+            }
+        } else {
+            // 达到要求
+            if (inputs.useMesh && inputs.meshConfig) {
+                if (x_out_display > 0.99) {
+                    evaluations.push({
+                        item: "出口干度 x_out",
+                        value: `${formatNumber(x_out_display, 3)} (要求: ${formatNumber(x_out_required, 3)})`,
+                        status: "优秀",
+                        statusClass: "status-ok",
+                        description: `✓ 满足要求：出口干度很高（> 99%），丝网除沫器效果显著，干度提升 ${formatNumber(drynessImprovement, 2)}%`
+                    });
+                } else if (x_out_display >= x_out_required) {
+                    evaluations.push({
+                        item: "出口干度 x_out",
+                        value: `${formatNumber(x_out_display, 3)} (要求: ${formatNumber(x_out_required, 3)})`,
+                        status: "达标",
+                        statusClass: "status-ok",
+                        description: `✓ 满足要求：出口干度达到要求值，干度提升 ${formatNumber(drynessImprovement, 2)}%`
+                    });
+                }
+            } else {
+                evaluations.push({
+                    item: "出口干度 x_out",
+                    value: `${formatNumber(x_out_display, 3)} (要求: ${formatNumber(x_out_required, 3)})`,
+                    status: "未安装丝网",
+                    statusClass: "status-info",
+                    description: "未安装丝网除沫器，出口干度等于入口干度"
+                });
+                if (inputs.x_in < x_out_required) {
+                    suggestions.push(`入口干度 ${formatNumber(inputs.x_in, 3)} 低于出口干度要求 ${formatNumber(x_out_required, 3)}，建议安装不锈钢丝网除沫器`);
+                }
+            }
+        }
+
+        // 评估是否需要不锈钢丝网（基于入口干度）
+        if (inputs.useMesh && inputs.meshConfig) {
+            evaluations.push({
+                item: "丝网除沫器",
+                value: "已安装",
+                status: "已配置",
+                statusClass: "status-ok",
+                description: `已配置不锈钢丝网除沫器（${inputs.meshConfig.mesh}目/英寸，${inputs.meshConfig.material}材质，分离效率 ${inputs.meshConfig.efficiency}%）`
+            });
+        } else if (inputs.x_in > 0.5) {
+            evaluations.push({
+                item: "丝网除沫器",
+                value: "建议安装",
+                status: "推荐",
+                statusClass: "status-warning",
+                description: "入口干度较高（> 50%），如果 Surge Drum 同时承担气液分离功能，建议在气体出口处安装不锈钢丝网除沫器"
+            });
+            suggestions.push("入口干度较高，建议在气体出口处安装不锈钢丝网除沫器（推荐规格：60-100目/英寸，厚度 100-150mm）以提高分离效果");
+        } else if (inputs.x_in > 0.3) {
+            evaluations.push({
+                item: "丝网除沫器",
+                value: "可选",
+                status: "可选",
+                statusClass: "status-info",
+                description: "入口干度中等（30-50%），如需要更好的分离效果，可考虑安装不锈钢丝网除沫器"
+            });
+            suggestions.push("入口干度中等，如需要更好的分离效果，可考虑在气体出口处安装不锈钢丝网除沫器（推荐规格：60-80目/英寸）");
+        } else {
+            evaluations.push({
+                item: "丝网除沫器",
+                value: "通常不需要",
+                status: "正常",
+                statusClass: "status-ok",
+                description: "入口干度较低（< 30%），Surge Drum 主要用于液体缓冲，通常不需要丝网除沫器"
+            });
+        }
+
+        // 返回计算结果
+        return {
+            success: true,
+            surgeTimeMin: surgeTime_min,
+            surgeTimeSec: surgeTime_s,
+            liquidVolumeM3: V_liq,
+            liquidVolumeL: V_liq * 1000,  // 转换为升
+            liquidFlowRateM3s: q_liq,
+            liquidFlowRateKgs: m_dot_liq_kg_s,
+            gasFlowRateM3s: q_gas,
+            gasFlowRateKgs: m_dot_gas_kg_s,
+            liquidDensity: rho_liq,
+            gasDensity: rho_gas,
+            settlingVelocity: vt,  // 沉降速度
+            horizontalVelocity: vh,  // 水平气速
+            reentrainmentVelocity: v_max_entrainment,  // 防夹带速度 Vre
+            velocityRatioRe: velocityRatio_re,  // 防夹带速度比值 vh/Vre
+            isSafeVelocity: isSafeVelocity,  // 是否安全（vh < Vre）
+            inputLength: L_m * 1000,  // 输入长度（mm）
+            minRequiredLength: L_min_final_mm,  // 最小长度要求（mm）
+            meetsLengthRequirement: meetsLengthRequirement,  // 是否满足长度要求
+            lengthRatio: L_ratio,  // 长度比值
+            Ks: Ks,  // Souders-Brown 系数
+            x_in: inputs.x_in,  // 入口干度
+            x_out: x_out,  // 出口干度
+            x_out_required: inputs.x_out_required || 0.95,  // 出口干度要求
+            meetsDrynessRequirement: meetsRequirement,  // 是否满足干度要求
+            drynessGap: drynessGap,  // 与要求的差距
+            separatedLiquidMass: separatedLiquidMass,  // 被分离的液体质量流量
+            useMesh: inputs.useMesh || false,  // 是否使用丝网
+            meshConfig: inputs.meshConfig,  // 丝网配置
+            L_D_ratio: L_D_ratio,
+            liquidVolumeRatio: liquidVolumeRatio,
+            surgeTimeAdvice: surgeTimeAdvice,  // 参考建议（滞留时间）
+            statusClass: overallStatusClass,  // 主要评判状态（基于分离效果）
+            // 接管管径
+            inletDiameter: inletDiameter_mm,  // 入口管管径 (mm)
+            inletVelocity: inputs.inletVelocity,  // 入口管流速
+            inletCount: inputs.inletCount,  // 入口管数量
+            liquidDiameter: liquidDiameter_mm,  // 下液管管径 (mm)
+            liquidVelocity: inputs.liquidVelocity,  // 下液管流速
+            liquidCount: inputs.liquidCount,  // 下液管数量
+            outletDiameter: outletDiameter_mm,  // 出气管管径 (mm)
+            outletVelocity: inputs.outletVelocity,  // 出气管流速
+            outletCount: inputs.outletCount,  // 出气管数量
+            evaluations: evaluations,
+            suggestions: suggestions
+        };
+
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message || '计算过程中发生未知错误'
+        };
+    }
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
     // 类型切换功能
     const verticalBtn = document.getElementById('verticalBtn');
     const horizontalBtn = document.getElementById('horizontalBtn');
-    const knockoutBtn = document.getElementById('knockoutBtn');
+    const surgeDrumBtn = document.getElementById('surgeDrumBtn');
     const steamBtn = document.getElementById('steamBtn');
     const verticalContent = document.getElementById('verticalContent');
     const horizontalContent = document.getElementById('horizontalContent');
-    const knockoutContent = document.getElementById('knockoutContent');
+    const surgeDrumContent = document.getElementById('surgeDrumContent');
     const steamContent = document.getElementById('steamContent');
     
     // 设置初始显示状态（确保只有制冷立式显示）
@@ -2869,9 +3679,9 @@ document.addEventListener('DOMContentLoaded', () => {
         horizontalContent.style.display = 'none';
         horizontalContent.style.visibility = 'hidden';
     }
-    if (knockoutContent) {
-        knockoutContent.style.display = 'none';
-        knockoutContent.style.visibility = 'hidden';
+    if (surgeDrumContent) {
+        surgeDrumContent.style.display = 'none';
+        surgeDrumContent.style.visibility = 'hidden';
     }
     if (steamContent) {
         steamContent.style.display = 'none';
@@ -2881,7 +3691,7 @@ document.addEventListener('DOMContentLoaded', () => {
     verticalBtn.addEventListener('click', () => {
         verticalBtn.classList.add('active');
         horizontalBtn.classList.remove('active');
-        if (knockoutBtn) knockoutBtn.classList.remove('active');
+        if (surgeDrumBtn) surgeDrumBtn.classList.remove('active');
         steamBtn.classList.remove('active');
         if (verticalContent) {
             verticalContent.style.display = 'block';
@@ -2891,9 +3701,9 @@ document.addEventListener('DOMContentLoaded', () => {
             horizontalContent.style.display = 'none';
             horizontalContent.style.visibility = 'hidden';
         }
-        if (knockoutContent) {
-            knockoutContent.style.display = 'none';
-            knockoutContent.style.visibility = 'hidden';
+        if (surgeDrumContent) {
+            surgeDrumContent.style.display = 'none';
+            surgeDrumContent.style.visibility = 'hidden';
         }
         if (steamContent) {
             steamContent.style.display = 'none';
@@ -2904,7 +3714,7 @@ document.addEventListener('DOMContentLoaded', () => {
     horizontalBtn.addEventListener('click', () => {
         horizontalBtn.classList.add('active');
         verticalBtn.classList.remove('active');
-        if (knockoutBtn) knockoutBtn.classList.remove('active');
+        if (surgeDrumBtn) surgeDrumBtn.classList.remove('active');
         steamBtn.classList.remove('active');
         if (horizontalContent) {
             horizontalContent.style.display = 'block';
@@ -2914,9 +3724,9 @@ document.addEventListener('DOMContentLoaded', () => {
             verticalContent.style.display = 'none';
             verticalContent.style.visibility = 'hidden';
         }
-        if (knockoutContent) {
-            knockoutContent.style.display = 'none';
-            knockoutContent.style.visibility = 'hidden';
+        if (surgeDrumContent) {
+            surgeDrumContent.style.display = 'none';
+            surgeDrumContent.style.visibility = 'hidden';
         }
         if (steamContent) {
             steamContent.style.display = 'none';
@@ -2924,17 +3734,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // 制冷满液气分按钮事件处理 - 正在编制中
-    /*
-    if (knockoutBtn) {
-        knockoutBtn.addEventListener('click', () => {
-            knockoutBtn.classList.add('active');
+    // Surge Drum 按钮事件处理
+    if (surgeDrumBtn) {
+        surgeDrumBtn.addEventListener('click', () => {
+            surgeDrumBtn.classList.add('active');
             verticalBtn.classList.remove('active');
             horizontalBtn.classList.remove('active');
             steamBtn.classList.remove('active');
-            if (knockoutContent) {
-                knockoutContent.style.display = 'block';
-                knockoutContent.style.visibility = 'visible';
+            if (surgeDrumContent) {
+                surgeDrumContent.style.display = 'block';
+                surgeDrumContent.style.visibility = 'visible';
             }
             if (verticalContent) {
                 verticalContent.style.display = 'none';
@@ -2950,13 +3759,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    */
 
     steamBtn.addEventListener('click', () => {
         steamBtn.classList.add('active');
         verticalBtn.classList.remove('active');
         horizontalBtn.classList.remove('active');
-        if (knockoutBtn) knockoutBtn.classList.remove('active');
+        if (surgeDrumBtn) surgeDrumBtn.classList.remove('active');
         if (steamContent) {
             steamContent.style.display = 'block';
             steamContent.style.visibility = 'visible';
@@ -2969,9 +3777,9 @@ document.addEventListener('DOMContentLoaded', () => {
             horizontalContent.style.display = 'none';
             horizontalContent.style.visibility = 'hidden';
         }
-        if (knockoutContent) {
-            knockoutContent.style.display = 'none';
-            knockoutContent.style.visibility = 'hidden';
+        if (surgeDrumContent) {
+            surgeDrumContent.style.display = 'none';
+            surgeDrumContent.style.visibility = 'hidden';
         }
     });
 
@@ -2982,17 +3790,530 @@ document.addEventListener('DOMContentLoaded', () => {
     const calcBtnH = document.getElementById('calculateBtnH');
     calcBtnH.addEventListener('click', calculateHorizontal);
     
-    // 制冷满液气分计算按钮事件处理 - 正在编制中
-    /*
-    const calcBtnK = document.getElementById('calculateBtnK');
-    if (calcBtnK) {
-        calcBtnK.addEventListener('click', calculateKnockout);
-    }
-    */
-    
     const calcBtnSteam = document.getElementById('calculateBtnSteam');
     if (calcBtnSteam) {
         calcBtnSteam.addEventListener('click', calculateSteam);
+    }
+
+    // Surge Drum 计算模式切换
+    const surgeDrumCalcMode = document.getElementById('surgeDrumCalcMode');
+    const surgeDrumCoolingCapacityGroup = document.getElementById('surgeDrumCoolingCapacityGroup');
+    const surgeDrumSuperheatGroup = document.getElementById('surgeDrumSuperheatGroup');
+    const surgeDrumMassFlowGroup = document.getElementById('surgeDrumMassFlowGroup');
+    
+    if (surgeDrumCalcMode) {
+        surgeDrumCalcMode.addEventListener('change', (e) => {
+            if (e.target.value === 'cooling-capacity') {
+                // 制冷量模式：显示制冷量、过热度，隐藏质量流量
+                if (surgeDrumCoolingCapacityGroup) surgeDrumCoolingCapacityGroup.style.display = 'block';
+                if (surgeDrumSuperheatGroup) surgeDrumSuperheatGroup.style.display = 'block';
+                if (surgeDrumMassFlowGroup) surgeDrumMassFlowGroup.style.display = 'none';
+            } else {
+                // 质量流量模式：显示质量流量，隐藏制冷量相关
+                if (surgeDrumCoolingCapacityGroup) surgeDrumCoolingCapacityGroup.style.display = 'none';
+                if (surgeDrumSuperheatGroup) surgeDrumSuperheatGroup.style.display = 'none';
+                if (surgeDrumMassFlowGroup) surgeDrumMassFlowGroup.style.display = 'block';
+            }
+        });
+        
+        // 初始化显示状态
+        if (surgeDrumCalcMode.value === 'cooling-capacity') {
+            if (surgeDrumCoolingCapacityGroup) surgeDrumCoolingCapacityGroup.style.display = 'block';
+            if (surgeDrumSuperheatGroup) surgeDrumSuperheatGroup.style.display = 'block';
+            if (surgeDrumMassFlowGroup) surgeDrumMassFlowGroup.style.display = 'none';
+        } else {
+            if (surgeDrumCoolingCapacityGroup) surgeDrumCoolingCapacityGroup.style.display = 'none';
+            if (surgeDrumSuperheatGroup) surgeDrumSuperheatGroup.style.display = 'none';
+            if (surgeDrumMassFlowGroup) surgeDrumMassFlowGroup.style.display = 'block';
+        }
+    }
+
+    // Surge Drum 丝网复选框切换
+    const surgeDrumUseMesh = document.getElementById('surgeDrumUseMesh');
+    const surgeDrumMeshSpecGroup = document.getElementById('surgeDrumMeshSpecGroup');
+    
+    if (surgeDrumUseMesh && surgeDrumMeshSpecGroup) {
+        // 初始状态：根据复选框状态显示/隐藏
+        const updateMeshSpecVisibility = () => {
+            if (surgeDrumUseMesh.checked) {
+                surgeDrumMeshSpecGroup.style.display = 'block';
+            } else {
+                surgeDrumMeshSpecGroup.style.display = 'none';
+            }
+        };
+        
+        surgeDrumUseMesh.addEventListener('change', updateMeshSpecVisibility);
+        updateMeshSpecVisibility(); // 初始化
+    }
+
+    // Surge Drum 校验计算按钮事件处理
+    const calcBtnSurgeDrum = document.getElementById('calculateSurgeDrumBtn');
+    if (calcBtnSurgeDrum) {
+        calcBtnSurgeDrum.addEventListener('click', async () => {
+            try {
+                // 获取计算模式
+                const calcMode = document.getElementById('surgeDrumCalcMode').value;
+                
+                // 获取所有输入元素
+                const D_mm = parseFloat(document.getElementById('surgeDrumD').value);
+                const L_mm = parseFloat(document.getElementById('surgeDrumL').value);
+                const level_percent = parseFloat(document.getElementById('surgeDrumLevel').value);
+                const refrigerant = document.getElementById('surgeDrumRefrigerant').value;
+                const Te_C = parseFloat(document.getElementById('surgeDrumEvapTemp').value);
+                const x_in = parseFloat(document.getElementById('surgeDrumXin').value);
+                const x_out_required = parseFloat(document.getElementById('surgeDrumXoutRequired').value) || 0.95;
+                const Ks = parseFloat(document.getElementById('surgeDrumKs').value) || 0.07;
+                
+                // 获取接管流速和数量
+                const inletVelocity = parseFloat(document.getElementById('surgeDrumInletVelocity').value) || 5.0;
+                const inletCount = parseInt(document.getElementById('surgeDrumInletCount').value) || 1;
+                const liquidVelocity = parseFloat(document.getElementById('surgeDrumLiquidVelocity').value) || 0.5;
+                const liquidCount = parseInt(document.getElementById('surgeDrumLiquidCount').value) || 1;
+                const outletVelocity = parseFloat(document.getElementById('surgeDrumOutletVelocity').value) || 10.0;
+                const outletCount = parseInt(document.getElementById('surgeDrumOutletCount').value) || 1;
+                
+                // 获取丝网配置
+                const useMesh = document.getElementById('surgeDrumUseMesh')?.checked || false;
+                let meshConfig = null;
+                if (useMesh) {
+                    meshConfig = {
+                        mesh: parseInt(document.getElementById('surgeDrumMeshMesh').value) || 80,
+                        thickness: parseFloat(document.getElementById('surgeDrumMeshThickness').value) || 100,
+                        material: document.getElementById('surgeDrumMeshMaterial').value || '304',
+                        wireDiameter: parseFloat(document.getElementById('surgeDrumMeshWireDiameter').value) || 0.2,
+                        efficiency: parseFloat(document.getElementById('surgeDrumMeshEfficiency').value) || 99.5
+                    };
+                }
+
+                // 基本数据验证
+                if (isNaN(D_mm) || D_mm <= 0) {
+                    throw new Error('筒体内径 D 必须大于 0');
+                }
+                if (isNaN(L_mm) || L_mm <= 0) {
+                    throw new Error('筒体直段长度 L 必须大于 0');
+                }
+                if (isNaN(level_percent) || level_percent < 0 || level_percent > 100) {
+                    throw new Error('液位高度百分比必须在 0-100 之间');
+                }
+                if (isNaN(Te_C)) {
+                    throw new Error('请输入有效的蒸发温度');
+                }
+                if (isNaN(x_in) || x_in < 0 || x_in > 1) {
+                    throw new Error('入口干度必须在 0.0 - 1.0 之间');
+                }
+                if (isNaN(x_out_required) || x_out_required < 0 || x_out_required > 1) {
+                    throw new Error('出口干度要求必须在 0.0 - 1.0 之间');
+                }
+                if (x_out_required <= x_in) {
+                    throw new Error('出口干度要求必须大于入口干度');
+                }
+                if (isNaN(Ks) || Ks <= 0 || Ks > 0.2) {
+                    throw new Error('Ks 系数必须在 0.05 - 0.15 m/s 之间');
+                }
+
+                // 根据计算模式验证和获取参数
+                let inputs = {
+                    calcMode: calcMode,
+                    refrigerant: refrigerant,
+                    Te_C: Te_C,  // 蒸发温度（用于计算饱和温度）
+                    T_sat_c: Te_C,  // 对于 Surge Drum，饱和温度等于蒸发温度
+                    x_in: x_in,
+                    x_out_required: x_out_required,  // 出口干度要求
+                    D_mm: D_mm,
+                    L_mm: L_mm,  // 输入长度
+                    level_percent: level_percent,
+                    Ks: Ks,
+                    useMesh: useMesh,
+                    meshConfig: meshConfig,
+                    inletVelocity: inletVelocity,
+                    inletCount: inletCount,
+                    liquidVelocity: liquidVelocity,
+                    liquidCount: liquidCount,
+                    outletVelocity: outletVelocity,
+                    outletCount: outletCount
+                };
+
+                if (calcMode === 'cooling-capacity') {
+                    // 制冷量模式
+                    const Q_kW = parseFloat(document.getElementById('surgeDrumCoolingCapacity').value);
+                    const Te_C = parseFloat(document.getElementById('surgeDrumEvapTemp').value);
+                    const deltaT_sh = parseFloat(document.getElementById('surgeDrumSuperheat').value);
+                    
+                    if (isNaN(Q_kW) || Q_kW <= 0) {
+                        throw new Error('制冷量必须大于 0');
+                    }
+                    if (isNaN(Te_C)) {
+                        throw new Error('请输入有效的蒸发温度');
+                    }
+                    if (isNaN(deltaT_sh) || deltaT_sh < 0) {
+                        throw new Error('吸气过热度必须大于等于 0');
+                    }
+                    
+                    inputs.Q_kW = Q_kW;
+                    inputs.Te_C = Te_C;
+                    inputs.deltaT_sh = deltaT_sh;
+                } else {
+                    // 质量流量模式
+                    const m_dot_total_kgh = parseFloat(document.getElementById('surgeDrumMassFlow').value);
+                    if (isNaN(m_dot_total_kgh) || m_dot_total_kgh <= 0) {
+                        throw new Error('总入口质量流量必须大于 0');
+                    }
+                    inputs.m_dot_total_kgh = m_dot_total_kgh;
+                }
+
+                // 禁用按钮并显示计算中状态
+                calcBtnSurgeDrum.disabled = true;
+                calcBtnSurgeDrum.textContent = '计算中...';
+
+                // 调用计算函数
+                const result = await calculateHorizontalSurgeTime(inputs);
+
+                // 更新 Vre 显示字段
+                const vreInput = document.getElementById('surgeDrumVre');
+                if (vreInput && result.success) {
+                    vreInput.value = formatNumber(result.reentrainmentVelocity || 0, 3);
+                } else if (vreInput) {
+                    vreInput.value = '-';
+                }
+
+                // 恢复按钮状态
+                calcBtnSurgeDrum.disabled = false;
+                calcBtnSurgeDrum.textContent = '开始校验计算';
+
+                // 获取结果显示容器
+                const resultsContainer = document.getElementById('surgeDrumResults');
+                if (!resultsContainer) {
+                    throw new Error('找不到结果显示容器');
+                }
+
+                // 显示结果
+                resultsContainer.style.display = 'block';
+
+                if (!result.success) {
+                    // 显示错误信息
+                    resultsContainer.className = 'results-container error';
+                    resultsContainer.innerHTML = `
+                        <div class="error-message">
+                            <strong>计算失败</strong><br>
+                            ${result.error}
+                        </div>
+                    `;
+                } else {
+                    // 显示成功结果
+                    // 根据状态类设置容器的背景色
+                    let containerClass = 'results-container';
+                    if (result.statusClass === 'status-danger') {
+                        containerClass = 'results-container status-danger';
+                    } else if (result.statusClass === 'status-warning') {
+                        containerClass = 'results-container status-warning';
+                    } else if (result.statusClass === 'status-ok') {
+                        containerClass = 'results-container status-ok';
+                    } else if (result.statusClass === 'status-info') {
+                        containerClass = 'results-container status-info';
+                    }
+                    
+                    // 获取输入参数用于显示
+                    const inputD_mm = parseFloat(document.getElementById('surgeDrumD').value) || 0;
+                    
+                    resultsContainer.className = containerClass;
+                    resultsContainer.innerHTML = `
+                        <h3 class="${result.statusClass}">计算结果</h3>
+                        <div class="result-main">
+                            <div class="result-main-label">长度校核结果</div>
+                            <div>
+                                <span class="result-main-value" style="${result.meetsLengthRequirement ? 'color: #2e7d32;' : 'color: #d32f2f;'}">
+                                    ${result.meetsLengthRequirement ? '✓ 满足要求' : '⚠ 不满足要求'}
+                                </span>
+                            </div>
+                        </div>
+                        ${result.surgeTimeAdvice ? `
+                        <div class="advice-section">
+                            <p class="advice-text status-info">${result.surgeTimeAdvice}</p>
+                        </div>
+                        ` : ''}
+                        ${result.evaluations && result.evaluations.length > 0 ? `
+                        <div class="evaluations-section">
+                            <h4>关键数据评估</h4>
+                            <div class="evaluations-list">
+                                ${result.evaluations.map(item => `
+                                    <div class="evaluation-item ${item.statusClass}">
+                                        <div class="evaluation-header">
+                                            <span class="evaluation-name">${item.item}</span>
+                                            <span class="evaluation-value">${item.value}</span>
+                                            <span class="evaluation-status ${item.statusClass}">${item.status}</span>
+                                        </div>
+                                        <div class="evaluation-desc">${item.description}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${result.suggestions && result.suggestions.length > 0 ? `
+                        <div class="suggestions-section">
+                            <h4>修改建议</h4>
+                            <ul class="suggestions-list">
+                                ${result.suggestions.map(suggestion => `
+                                    <li class="suggestion-item">${suggestion}</li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                        ` : ''}
+                        <div class="result-details">
+                            <!-- 分区 1：几何尺寸 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #1976d2;">
+                                <h4 style="margin: 0 0 12px 0; color: #1976d2; font-size: 16px; font-weight: 600;">几何尺寸</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">筒体内径 D</span>
+                                    <span class="result-detail-value">${inputD_mm || 0} mm</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">输入长度 L</span>
+                                    <span class="result-detail-value">${formatNumber(result.inputLength || 0, 0)} mm</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">最小长度要求 L_min</span>
+                                    <span class="result-detail-value">${formatNumber(result.minRequiredLength || 0, 0)} mm</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">长度校核</span>
+                                    <span class="result-detail-value" style="${result.meetsLengthRequirement ? 'color: #2e7d32; font-weight: bold;' : 'color: #d32f2f; font-weight: bold;'}">
+                                        ${result.meetsLengthRequirement ? '✓ 满足要求' : '⚠ 不满足要求'}
+                                        (比值: ${formatNumber(result.lengthRatio || 0, 2)})
+                                    </span>
+                                </div>
+                                ${!result.meetsLengthRequirement ? `
+                                <div class="result-detail-item" style="background: #ffebee; padding: 10px; border-left: 4px solid #d32f2f; margin-top: 10px;">
+                                    <span class="result-detail-label" style="color: #d32f2f; font-weight: bold;">⚠️ 警告：长度不满足分离要求</span>
+                                    <div style="margin-top: 5px; color: #c62828;">
+                                        输入长度 ${formatNumber(result.inputLength || 0, 0)} mm < 最小长度要求 ${formatNumber(result.minRequiredLength || 0, 0)} mm
+                                    </div>
+                                </div>
+                                ` : ''}
+                                <div class="result-detail-item" style="background: #f9f9f9; padding: 10px; border-left: 3px solid #1976d2; margin-top: 8px; font-size: 12px; color: #555;">
+                                    <div style="font-weight: bold; margin-bottom: 5px; color: #1976d2;">长度校核判定依据：</div>
+                                    <div style="line-height: 1.6;">
+                                        <div>• <strong>最小长度要求 L_min</strong> = (S_l / vt) × vh × 安全系数（1.1）</div>
+                                        <div>• 其中 S_l = 气相高度（从液面到容器顶部），vt = 沉降速度，vh = 水平气速</div>
+                                        <div>• 确保 L_min ≥ 2.0 × D（长径比至少为 2.0）</div>
+                                        <div>• <strong>判定标准：</strong>输入长度 L ≥ L_min 为满足要求，否则不满足</div>
+                                    </div>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">长径比 L/D</span>
+                                    <span class="result-detail-value">${formatNumber(result.L_D_ratio || 0, 2)}</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">实际液体体积</span>
+                                    <span class="result-detail-value">${formatNumber(result.liquidVolumeM3, 3)} m³ (${formatNumber(result.liquidVolumeL, 1)} L)</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 分区 2：接管尺寸 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #2e7d32;">
+                                <h4 style="margin: 0 0 12px 0; color: #2e7d32; font-size: 16px; font-weight: 600;">接管尺寸</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">带液气体入口管</span>
+                                    <span class="result-detail-value">${formatNumber(result.inletDiameter || 0, 0)} mm (${result.inletCount || 1}根, ${formatNumber(result.inletVelocity || 5, 1)} m/s)</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">下液管</span>
+                                    <span class="result-detail-value">${formatNumber(result.liquidDiameter || 0, 0)} mm (${result.liquidCount || 1}根, ${formatNumber(result.liquidVelocity || 0.5, 2)} m/s)</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">出气管</span>
+                                    <span class="result-detail-value">${formatNumber(result.outletDiameter || 0, 0)} mm (${result.outletCount || 1}根, ${formatNumber(result.outletVelocity || 10, 1)} m/s)</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 分区 3：流量参数 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #f57c00;">
+                                <h4 style="margin: 0 0 12px 0; color: #f57c00; font-size: 16px; font-weight: 600;">流量参数</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">液相体积流量</span>
+                                    <span class="result-detail-value">${formatNumber(result.liquidFlowRateM3s, 6)} m³/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">液相质量流量</span>
+                                    <span class="result-detail-value">${formatNumber(result.liquidFlowRateKgs, 3)} kg/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">气相体积流量</span>
+                                    <span class="result-detail-value">${formatNumber(result.gasFlowRateM3s || 0, 6)} m³/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">气相质量流量</span>
+                                    <span class="result-detail-value">${formatNumber(result.gasFlowRateKgs || 0, 3)} kg/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">液体滞留时间</span>
+                                    <span class="result-detail-value">${formatNumber(result.surgeTimeSec, 2)} s (${formatNumber(result.surgeTimeMin, 2)} 分钟)</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 分区 4：物性参数 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #7b1fa2;">
+                                <h4 style="margin: 0 0 12px 0; color: #7b1fa2; font-size: 16px; font-weight: 600;">物性参数</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">饱和液体密度</span>
+                                    <span class="result-detail-value">${formatNumber(result.liquidDensity, 2)} kg/m³</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">饱和气体密度</span>
+                                    <span class="result-detail-value">${formatNumber(result.gasDensity || 0, 3)} kg/m³</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">沉降速度 vt</span>
+                                    <span class="result-detail-value">${formatNumber(result.settlingVelocity || 0, 4)} m/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">水平气速 vh</span>
+                                    <span class="result-detail-value">${formatNumber(result.horizontalVelocity || 0, 3)} m/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">防夹带速度 Vre</span>
+                                    <span class="result-detail-value">${formatNumber(result.reentrainmentVelocity || 0, 3)} m/s</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">防夹带速度比值 (vh/Vre)</span>
+                                    <span class="result-detail-value" style="${result.velocityRatioRe < 0.8 ? 'color: #2e7d32; font-weight: bold;' : result.velocityRatioRe < 0.9 ? 'color: #f57c00; font-weight: bold;' : 'color: #d32f2f; font-weight: bold;'}">
+                                        ${formatNumber(result.velocityRatioRe || 0, 3)}
+                                        ${result.velocityRatioRe < 0.8 ? '✓' : result.velocityRatioRe < 0.9 ? '⚠' : '❌'}
+                                    </span>
+                                </div>
+                                <div class="result-detail-item" style="background: #f9f9f9; padding: 10px; border-left: 3px solid #1976d2; margin-top: 8px; font-size: 12px; color: #555;">
+                                    <div style="font-weight: bold; margin-bottom: 5px; color: #1976d2;">判定依据说明：</div>
+                                    <div style="line-height: 1.6;">
+                                        <div><strong>防夹带速度比值 (vh/Vre) 判定标准：</strong></div>
+                                        <div>• <span style="color: #d32f2f;">vh/Vre ≥ 1.0</span>：危险 - 水平气速超过防夹带速度，会发生液滴夹带</div>
+                                        <div>• <span style="color: #f57c00;">0.9 ≤ vh/Vre < 1.0</span>：接近危险 - 水平气速接近防夹带速度，存在夹带风险</div>
+                                        <div>• <span style="color: #f57c00;">0.8 ≤ vh/Vre < 0.9</span>：偏高 - 建议控制在 0.8 以下</div>
+                                        <div>• <span style="color: #2e7d32;">0.6 ≤ vh/Vre < 0.8</span>：合理 - 水平气速在安全范围内</div>
+                                        <div>• <span style="color: #2e7d32;">vh/Vre < 0.6</span>：优秀 - 水平气速安全，有充足余量</div>
+                                        <div style="margin-top: 8px;"><strong>防夹带速度 Vre 计算说明：</strong></div>
+                                        <div>• Vre 基于水力直径、液体雷诺数、密度系数和界面粘度系数计算</div>
+                                        <div>• 根据液体雷诺数 Rel 和界面粘度系数 N 的不同范围，采用不同的经验公式</div>
+                                        <div>• 确保 Vre 在合理范围内（通常为沉降速度 vt 的 1.5-20 倍）</div>
+                                    </div>
+                                </div>
+                                ${!result.isSafeVelocity ? `
+                                <div class="result-detail-item" style="background: #ffebee; padding: 10px; border-left: 4px solid #d32f2f; margin-top: 10px;">
+                                    <span class="result-detail-label" style="color: #d32f2f; font-weight: bold;">⚠️ 警告：水平气速超过防夹带速度</span>
+                                    <div style="margin-top: 5px; color: #c62828;">
+                                        水平气速 ${formatNumber(result.horizontalVelocity || 0, 3)} m/s > 防夹带速度 ${formatNumber(result.reentrainmentVelocity || 0, 3)} m/s，会发生液滴夹带
+                                    </div>
+                                </div>
+                                ` : result.velocityRatioRe >= 0.8 ? `
+                                <div class="result-detail-item" style="background: #fff3e0; padding: 10px; border-left: 4px solid #f57c00; margin-top: 10px;">
+                                    <span class="result-detail-label" style="color: #f57c00; font-weight: bold;">⚠️ 注意：水平气速偏高</span>
+                                    <div style="margin-top: 5px; color: #e65100;">
+                                        防夹带速度比值 ${formatNumber(result.velocityRatioRe || 0, 3)} ≥ 0.8，建议控制在 0.8 以下
+                                    </div>
+                                </div>
+                                ` : ''}
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">Souders-Brown 系数 Ks</span>
+                                    <span class="result-detail-value">${formatNumber(result.Ks || 0, 3)} m/s</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 分区 5：干度参数 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #c2185b;">
+                                <h4 style="margin: 0 0 12px 0; color: #c2185b; font-size: 16px; font-weight: 600;">干度参数</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">入口干度 x_in</span>
+                                    <span class="result-detail-value">${formatNumber(result.x_in || 0, 3)}</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">出口干度要求</span>
+                                    <span class="result-detail-value">${formatNumber(result.x_out_required || 0.95, 3)}</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">实际出口干度 x_out</span>
+                                    <span class="result-detail-value" style="${result.meetsDrynessRequirement ? 'color: #2e7d32; font-weight: bold;' : 'color: #d32f2f; font-weight: bold;'}">
+                                        ${formatNumber(result.x_out || 0, 3)} 
+                                        ${result.meetsDrynessRequirement ? '✓' : '⚠'}
+                                    </span>
+                                </div>
+                                ${!result.meetsDrynessRequirement ? `
+                                <div class="result-detail-item" style="background: #ffebee; padding: 10px; border-left: 4px solid #d32f2f; margin-top: 10px;">
+                                    <span class="result-detail-label" style="color: #d32f2f; font-weight: bold;">⚠️ 报警：出口干度未达标</span>
+                                    <div style="margin-top: 5px; color: #c62828;">
+                                        实际值 ${formatNumber(result.x_out || 0, 3)} < 要求值 ${formatNumber(result.x_out_required || 0.95, 3)}，差距 ${formatNumber(result.drynessGap || 0, 2)}%
+                                    </div>
+                                </div>
+                                ` : `
+                                <div class="result-detail-item" style="background: #e8f5e9; padding: 10px; border-left: 4px solid #2e7d32; margin-top: 10px;">
+                                    <span class="result-detail-label" style="color: #2e7d32; font-weight: bold;">✓ 出口干度满足要求</span>
+                                    <div style="margin-top: 5px; color: #1b5e20;">
+                                        实际值 ${formatNumber(result.x_out || 0, 3)} ≥ 要求值 ${formatNumber(result.x_out_required || 0.95, 3)}
+                                    </div>
+                                </div>
+                                `}
+                                <div class="result-detail-item" style="background: #f9f9f9; padding: 10px; border-left: 3px solid #c2185b; margin-top: 8px; font-size: 12px; color: #555;">
+                                    <div style="font-weight: bold; margin-bottom: 5px; color: #c2185b;">出口干度判定依据：</div>
+                                    <div style="line-height: 1.6;">
+                                        <div>• <strong>出口干度计算：</strong>如果安装丝网除沫器，x_out = x_in + (1 - x_in) × 丝网效率 × 有效性系数</div>
+                                        <div>• 有效性系数根据丝网目数确定：100目及以上 0.95，80目 0.90，60目 0.85，60目以下 0.75</div>
+                                        <div>• <strong>判定标准：</strong>实际出口干度 x_out ≥ 出口干度要求 x_out_required 为满足要求，否则报警</div>
+                                        <div>• 如果未安装丝网，出口干度等于入口干度</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            ${result.useMesh && result.meshConfig ? `
+                            <!-- 分区 6：丝网配置 -->
+                            <div class="result-section-group" style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border-left: 4px solid #1976d2;">
+                                <h4 style="margin: 0 0 12px 0; color: #1976d2; font-size: 16px; font-weight: 600;">不锈钢丝网配置</h4>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">丝网目数</span>
+                                    <span class="result-detail-value">${result.meshConfig.mesh} 目/英寸</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">丝网厚度</span>
+                                    <span class="result-detail-value">${formatNumber(result.meshConfig.thickness, 0)} mm</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">丝网材质</span>
+                                    <span class="result-detail-value">${result.meshConfig.material} 不锈钢</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">丝径</span>
+                                    <span class="result-detail-value">${formatNumber(result.meshConfig.wireDiameter, 2)} mm</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">分离效率</span>
+                                    <span class="result-detail-value">${formatNumber(result.meshConfig.efficiency, 1)} %</span>
+                                </div>
+                                <div class="result-detail-item">
+                                    <span class="result-detail-label">被分离的液体质量流量</span>
+                                    <span class="result-detail-value">${formatNumber(result.separatedLiquidMass || 0, 4)} kg/s</span>
+                                </div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                // 恢复按钮状态
+                if (calcBtnSurgeDrum) {
+                    calcBtnSurgeDrum.disabled = false;
+                    calcBtnSurgeDrum.textContent = '开始校验计算';
+                }
+
+                // 显示错误信息
+                const resultsContainer = document.getElementById('surgeDrumResults');
+                if (resultsContainer) {
+                    resultsContainer.style.display = 'block';
+                    resultsContainer.className = 'results-container error';
+                    resultsContainer.innerHTML = `
+                        <div class="error-message">
+                            <strong>输入验证失败</strong><br>
+                            ${error.message}
+                        </div>
+                    `;
+                }
+            }
+        });
     }
 
     // 绑定回车键事件（在输入框中按回车也可以计算）
@@ -3005,8 +4326,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     calculate();
                 } else if (horizontalContent.style.display !== 'none') {
                     calculateHorizontal();
-                } else if (knockoutContent && knockoutContent.style.display !== 'none') {
-                    // calculateKnockout(); // 正在编制中
+                } else if (surgeDrumContent && surgeDrumContent.style.display !== 'none') {
+                    // 触发 Surge Drum 计算按钮的点击事件
+                    if (calcBtnSurgeDrum) {
+                        calcBtnSurgeDrum.click();
+                    }
                 } else if (steamContent && steamContent.style.display !== 'none') {
                     calculateSteam();
                 }

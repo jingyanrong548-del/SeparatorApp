@@ -18,7 +18,7 @@
             <div class="type-selector">
                 <button id="verticalBtn" class="type-btn active">制冷立式</button>
                 <button id="horizontalBtn" class="type-btn">制冷卧式</button>
-                <button id="knockoutBtn" class="type-btn" disabled title="正在编制中">制冷满液气分 (正在编制中)</button>
+                <button id="surgeDrumBtn" class="type-btn">Surge Drum 校验</button>
                 <button id="steamBtn" class="type-btn">水蒸汽立式</button>
             </div>
         </section>
@@ -441,8 +441,6 @@
             </main>
         </div>
 
-        <!-- 制冷满液气分内容 - 正在编制中 -->
-
         <!-- 水蒸汽立式内容 -->
         <div id="steamContent" class="separator-content" style="display: none;">
             <main class="main-content">
@@ -617,6 +615,247 @@
                     <div class="conclusion-section" id="conclusionSectionSteam" style="display: none;">
                         <h3>结论与建议</h3>
                         <div id="conclusionContentSteam"></div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- Surge Drum 校验计算内容 -->
+        <div id="surgeDrumContent" class="separator-content module-surge-drum-verify" style="display: none;">
+            <main class="main-content">
+                <!-- 左侧：设置与计算区 -->
+                <section class="panel-settings input-section">
+                    <h2>Surge Drum 校验输入</h2>
+                    <form class="calculation-form">
+                        <!-- 计算模式选择 -->
+                        <div class="form-group calc-mode-group">
+                            <label for="surgeDrumCalcMode">计算模式</label>
+                            <select id="surgeDrumCalcMode" class="input-field">
+                                <option value="mass-flow">直接输入质量流量</option>
+                                <option value="cooling-capacity">从制冷量计算</option>
+                            </select>
+                            <small class="hint">选择计算模式以确定需要输入的参数</small>
+                        </div>
+
+                        <!-- 分组 1：设备几何尺寸 -->
+                        <div class="form-group-group">
+                            <h3 class="form-group-title">设备几何尺寸 (Geometry)</h3>
+                            <div class="form-group">
+                                <label for="surgeDrumD">筒体内径 D (mm)</label>
+                                <input type="number" id="surgeDrumD" class="input-field" step="10" min="50" placeholder="例如: 1200" value="1200" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="surgeDrumL">筒体直段长度 L (mm)</label>
+                                <input type="number" id="surgeDrumL" class="input-field" step="10" min="100" placeholder="例如: 3000" value="3000" required>
+                                <small class="hint">输入实际长度，系统将计算最小长度要求并校核是否满足分离要求</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumInletVelocity">带液气体入口管流速 (m/s)</label>
+                                <input type="number" id="surgeDrumInletVelocity" class="input-field" step="0.1" min="1" max="20" placeholder="例如: 5" value="5">
+                                <small class="hint">推荐范围: 3-8 m/s (默认 5 m/s)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumInletCount">入口管数量</label>
+                                <input type="number" id="surgeDrumInletCount" class="input-field" step="1" min="1" max="10" placeholder="例如: 1" value="1" required>
+                                <small class="hint">带液气体入口管数量</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumLiquidVelocity">下液管流速 (m/s)</label>
+                                <input type="number" id="surgeDrumLiquidVelocity" class="input-field" step="0.1" min="0.1" max="2" placeholder="例如: 0.5" value="0.5">
+                                <small class="hint">推荐范围: 0.3-1.0 m/s (默认 0.5 m/s)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumLiquidCount">下液管数量</label>
+                                <input type="number" id="surgeDrumLiquidCount" class="input-field" step="1" min="1" max="10" placeholder="例如: 1" value="1" required>
+                                <small class="hint">下液管数量（默认 1）</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumOutletVelocity">出气管流速 (m/s)</label>
+                                <input type="number" id="surgeDrumOutletVelocity" class="input-field" step="0.5" min="5" max="30" placeholder="例如: 10" value="10">
+                                <small class="hint">推荐范围: 8-15 m/s (默认 10 m/s)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumOutletCount">出气管数量</label>
+                                <input type="number" id="surgeDrumOutletCount" class="input-field" step="1" min="1" max="10" placeholder="例如: 1" value="1" required>
+                                <small class="hint">出气管数量（默认 1）</small>
+                            </div>
+                        </div>
+
+                        <!-- 分组 2：当前状态 -->
+                        <div class="form-group-group">
+                            <h3 class="form-group-title">当前状态 (Status)</h3>
+                            <div class="form-group">
+                                <label for="surgeDrumLevel">当前液位高度百分比 Liquid Level (%)</label>
+                                <input type="number" id="surgeDrumLevel" class="input-field" step="1" min="0" max="100" placeholder="例如: 50 (代表中心液位)" value="50" required>
+                                <small class="hint">输入范围: 0-100 (例如 50 代表中心液位)</small>
+                            </div>
+                        </div>
+
+                        <!-- 分组 3：工况参数 -->
+                        <div class="form-group-group">
+                            <h3 class="form-group-title">工况参数 (Operating Conditions)</h3>
+                            <div class="form-group">
+                                <label for="surgeDrumRefrigerant">制冷剂 (Refrigerant)</label>
+                                <select id="surgeDrumRefrigerant" class="input-field" required>
+                                    <optgroup label="低温制冷剂 (蒸发温度 < -20°C)">
+                                        <option value="R23">R23 (HFC-23)</option>
+                                        <option value="R508B">R508B (HFC-508B)</option>
+                                        <option value="R170">R170 (Ethane)</option>
+                                        <option value="R1150">R1150 (Ethylene)</option>
+                                    </optgroup>
+                                    <optgroup label="中温制冷剂 (-20°C ~ 10°C)">
+                                        <option value="R134a" selected>R134a (HFC-134a)</option>
+                                        <option value="R404A">R404A (HFC-404A)</option>
+                                        <option value="R407C">R407C (HFC-407C)</option>
+                                        <option value="R507A">R507A (HFC-507A)</option>
+                                        <option value="R22">R22 (HCFC-22)</option>
+                                        <option value="R1234ze(E)">R1234ze(E) (HFO-1234ze)</option>
+                                        <option value="R1234yf">R1234yf (HFO-1234yf)</option>
+                                        <option value="R32">R32 (HFC-32)</option>
+                                        <option value="R290">R290 (Propane)</option>
+                                        <option value="R600a">R600a (Isobutane)</option>
+                                        <option value="R410A">R410A (HFC-410A)</option>
+                                        <option value="R744">R744 (CO₂, 二氧化碳)</option>
+                                    </optgroup>
+                                    <optgroup label="高温制冷剂 (蒸发温度 > 10°C)">
+                                        <option value="R245fa">R245fa (HFC-245fa)</option>
+                                        <option value="R123">R123 (HCFC-123)</option>
+                                        <option value="R236fa">R236fa (HFC-236fa)</option>
+                                        <option value="R365mfc">R365mfc (HFC-365mfc)</option>
+                                        <option value="R717">R717 (Ammonia)</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            
+                            <!-- 制冷量模式输入 -->
+                            <div id="surgeDrumCoolingCapacityGroup" class="form-group" style="display: none;">
+                                <label for="surgeDrumCoolingCapacity">制冷量 Q (kW)</label>
+                                <input type="number" id="surgeDrumCoolingCapacity" class="input-field" step="0.1" min="0" placeholder="例如: 100" value="100">
+                            </div>
+                            <div id="surgeDrumSuperheatGroup" class="form-group" style="display: none;">
+                                <label for="surgeDrumSuperheat">吸气过热度 ΔT_sh (K)</label>
+                                <input type="number" id="surgeDrumSuperheat" class="input-field" step="0.1" min="0" placeholder="例如: 5" value="5">
+                                <small class="hint">推荐范围: 0 - 10 K</small>
+                            </div>
+                            
+                            <!-- 质量流量模式输入 -->
+                            <div id="surgeDrumMassFlowGroup" class="form-group">
+                                <label for="surgeDrumMassFlow">总入口质量流量 m_dot_total (kg/h)</label>
+                                <input type="number" id="surgeDrumMassFlow" class="input-field" step="10" min="0" placeholder="例如: 5000" value="5000">
+                            </div>
+                            
+                            <!-- 蒸发温度（两种模式都需要） -->
+                            <div class="form-group">
+                                <label for="surgeDrumEvapTemp">蒸发温度 Te (°C)</label>
+                                <input type="number" id="surgeDrumEvapTemp" class="input-field" step="0.1" placeholder="例如: -10" value="-10" required>
+                                <small class="hint">用于计算液体密度和物性参数。对于 Surge Drum，蒸发温度即为饱和温度。</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="surgeDrumXin">入口干度 x_in</label>
+                                <input type="number" id="surgeDrumXin" class="input-field" step="0.01" min="0" max="1" placeholder="例如: 0.2" value="0.2" required>
+                                <small class="hint">范围: 0.0 (饱和液体) - 1.0 (饱和蒸汽)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumXoutRequired">出口干度要求 x_out_required</label>
+                                <input type="number" id="surgeDrumXoutRequired" class="input-field" step="0.01" min="0" max="1" placeholder="例如: 0.95" value="0.95">
+                                <small class="hint">范围: 0.0 - 1.0 (默认 0.95，即95%干度要求。如果实际出口干度达不到此要求，将报警)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumKs">Souders-Brown 系数 Ks (m/s)</label>
+                                <input type="number" id="surgeDrumKs" class="input-field" step="0.01" min="0.05" max="0.15" placeholder="例如: 0.07" value="0.07">
+                                <small class="hint">推荐范围: 0.05 - 0.15 m/s (默认 0.07 m/s，用于计算沉降速度)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="surgeDrumVre">防夹带速度 Vre (m/s)</label>
+                                <input type="text" id="surgeDrumVre" class="input-field" readonly="readonly" style="background-color: #f5f5f5; cursor: not-allowed;" value="-">
+                                <small class="hint">计算后显示防夹带速度，用于评估水平气速是否安全（vh &lt; Vre）</small>
+                            </div>
+                        </div>
+
+                        <!-- 分组 4：不锈钢丝网配置 -->
+                        <div class="form-group-group">
+                            <h3 class="form-group-title">不锈钢丝网配置 (Wire Mesh Demister)</h3>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="surgeDrumUseMesh" class="input-checkbox" checked>
+                                    默认安装不锈钢丝网除沫器
+                                </label>
+                                <small class="hint">建议在气体出口处安装不锈钢丝网以提高分离效果</small>
+                            </div>
+                            
+                            <div id="surgeDrumMeshSpecGroup">
+                                <div class="form-group">
+                                    <label for="surgeDrumMeshMesh">丝网目数 (Mesh)</label>
+                                    <select id="surgeDrumMeshMesh" class="input-field">
+                                        <option value="100">100目/英寸 (细密，高效分离)</option>
+                                        <option value="80" selected>80目/英寸 (推荐)</option>
+                                        <option value="60">60目/英寸 (标准)</option>
+                                        <option value="50">50目/英寸 (粗疏)</option>
+                                        <option value="40">40目/英寸 (最粗)</option>
+                                    </select>
+                                    <small class="hint">目数越高，分离效果越好，但压降也越大</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="surgeDrumMeshThickness">丝网厚度 (mm)</label>
+                                    <input type="number" id="surgeDrumMeshThickness" class="input-field" step="10" min="50" max="200" placeholder="例如: 100" value="100">
+                                    <small class="hint">推荐范围: 100-150 mm (默认 100 mm)</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="surgeDrumMeshMaterial">丝网材质</label>
+                                    <select id="surgeDrumMeshMaterial" class="input-field">
+                                        <option value="304" selected>304 不锈钢 (标准)</option>
+                                        <option value="316">316 不锈钢 (耐腐蚀，推荐用于特殊工况)</option>
+                                        <option value="316L">316L 不锈钢 (超低碳，耐腐蚀性更好)</option>
+                                    </select>
+                                    <small class="hint">根据工况选择合适的材质</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="surgeDrumMeshWireDiameter">丝径 (mm)</label>
+                                    <input type="number" id="surgeDrumMeshWireDiameter" class="input-field" step="0.01" min="0.1" max="0.5" placeholder="例如: 0.2" value="0.2">
+                                    <small class="hint">推荐范围: 0.15-0.3 mm (默认 0.2 mm)</small>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="surgeDrumMeshEfficiency">分离效率 (%)</label>
+                                    <input type="number" id="surgeDrumMeshEfficiency" class="input-field" step="0.1" min="90" max="99.9" placeholder="例如: 99.5" value="99.5">
+                                    <small class="hint">丝网除沫器的分离效率，用于计算出口干度 (推荐: 99.0-99.9%)</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="button" id="calculateSurgeDrumBtn" class="calculate-btn btn-calculate">开始校验计算</button>
+                    </form>
+
+                    <!-- 结果显示区 -->
+                    <div id="surgeDrumResults" class="results-container" style="display: none;"></div>
+                </section>
+
+                <!-- 右侧：图示区 -->
+                <section class="panel-diagram result-section">
+                    <div class="diagram-container">
+                        <img 
+                            src="/surge-drum-diagram.png" 
+                            alt="卧式 Surge Drum 原理图" 
+                            class="separator-diagram"
+                            loading="lazy"
+                            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                        />
+                        <div style="display: none; padding: 20px; text-align: center; color: #66757f;">
+                            <p>请将卧式 Surge Drum 原理图放置在 <code>public/surge-drum-diagram.png</code></p>
+                        </div>
+                        <p class="diagram-caption">图示：卧式气液分离器结构及液位示意</p>
                     </div>
                 </section>
             </main>
