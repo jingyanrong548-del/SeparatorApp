@@ -157,6 +157,7 @@ async function calculateHorizontal() {
         const h_liq_ratio = parseFloat(document.getElementById('liquidLevelRatio').value);
         const Ks = parseFloat(document.getElementById('ksValue').value);
         const vh_vt_ratio = parseFloat(document.getElementById('velocityMultiplier').value);
+        const circulation_ratio = parseFloat(document.getElementById('circulationRatio').value);
 
         // 验证输入
         if (isNaN(Q_kW) || Q_kW <= 0) {
@@ -187,6 +188,9 @@ async function calculateHorizontal() {
         }
         if (calcModeH === 'auto' && (isNaN(vh_vt_ratio) || vh_vt_ratio < 1.0 || vh_vt_ratio > 5.0)) {
             throw new Error('水平气速倍数必须在 1.0 - 5.0 之间');
+        }
+        if (isNaN(circulation_ratio) || circulation_ratio < 1 || circulation_ratio > 10000) {
+            throw new Error('循环倍数必须在 1% - 10000% 之间');
         }
 
         // 禁用计算按钮
@@ -402,8 +406,9 @@ async function calculateHorizontal() {
         // 注意：如果后续调整了结构参数，停留时间会在调整后重新计算
         let liquid_volume_ratio = 1 - calculateGasAreaRatio(h_liq_ratio);
         let liquid_volume_m3 = Vol_m3 * liquid_volume_ratio;
-        // 假设液体流量为总流量的10%（粗略估算）
-        const liquid_flow_m3_s = V_g * 0.1 * (rho_g / rho_l);
+        // 计算液体流量（基于循环倍数）
+        const circulation_factor = circulation_ratio / 100; // 转换为倍数（如10% → 0.1）
+        const liquid_flow_m3_s = V_g * circulation_factor * (rho_g / rho_l);
         let residence_time = liquid_volume_m3 / Math.max(liquid_flow_m3_s, 1e-6);
 
         // 15. 计算防夹带速度 Vre (Re-entrainment velocity)
